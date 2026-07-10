@@ -1,11 +1,13 @@
 import SwiftUI
 
 /// Tres puntos con pulso — el "está trabajando" de Fold.
+/// Con Reduce Motion activo los puntos quedan estáticos.
 struct PulsingDots: View {
     var tint: Color = .secondary
     var size: CGFloat = 5
 
     @State private var animating = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: size * 0.8) {
@@ -16,13 +18,15 @@ struct PulsingDots: View {
                     .scaleEffect(animating ? 1.0 : 0.55)
                     .opacity(animating ? 1.0 : 0.4)
                     .animation(
-                        .easeInOut(duration: 0.5)
+                        reduceMotion ? nil : .easeInOut(duration: 0.5)
                             .repeatForever(autoreverses: true)
                             .delay(Double(index) * 0.16),
                         value: animating
                     )
             }
         }
-        .onAppear { animating = true }
+        .onAppear { animating = !reduceMotion }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(String(localized: "El agente está trabajando"))
     }
 }

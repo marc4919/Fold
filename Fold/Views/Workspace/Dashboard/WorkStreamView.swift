@@ -279,9 +279,10 @@ private struct StreamEventRow: View {
     }
 }
 
-/// Cursor de terminal parpadeante.
+/// Cursor de terminal parpadeante (estático con Reduce Motion).
 struct BlinkingCursor: View {
     @State private var visible = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Rectangle()
@@ -289,9 +290,11 @@ struct BlinkingCursor: View {
             .frame(width: 6, height: 11)
             .opacity(visible ? 1 : 0.15)
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
                     visible = false
                 }
             }
+            .accessibilityHidden(true)
     }
 }

@@ -35,5 +35,7 @@ struct SelectableChip: View {
             in: .capsule
         )
         .animation(.smooth(duration: 0.2), value: isSelected)
+        // Selección expuesta como trait: el estado no depende solo del tinte.
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }

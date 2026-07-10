@@ -66,5 +66,9 @@ struct PillTabBar: View {
         )
         .glassEffectID(tab.id, in: glassNamespace)
         .transition(.scale(scale: 0.9).combined(with: .opacity))
+        // El estado seleccionado se expone como trait, no solo con el tinte.
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityLabel(Text(tab.label))
+        .accessibilityValue(tab.isCompleted ? Text("completada") : Text(""))
     }
 }

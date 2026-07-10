@@ -15,7 +15,8 @@ enum AgentEvent: Sendable {
 }
 
 /// Modo de la sesión: explorar no puede tocar archivos; trabajar sí.
-/// Los permisos son una propiedad del sistema, no una súplica en el prompt.
+/// Los permisos son una propiedad del sistema (flags/sandbox del CLI),
+/// no una súplica en el prompt.
 nonisolated enum AgentMode: Sendable, Equatable {
     case explore
     case work
@@ -24,6 +25,8 @@ nonisolated enum AgentMode: Sendable, Equatable {
 /// Lanza el binario del agente en modo headless con salida estructurada
 /// (nunca scrapea el TUI) y traduce su stream al contrato canónico.
 /// Hereda la autenticación de la sesión CLI existente del usuario.
+/// Ejecuta binario + argumentos directamente vía ProcessSupervisor: sin shell,
+/// con grupo de procesos propio, buffers acotados y timeout por inactividad.
 enum AgentRunner {
     private enum Parser: Sendable {
         case claudeJSON
@@ -33,7 +36,8 @@ enum AgentRunner {
 
     /// Ejecuta un prompt contra el agente y devuelve el stream de eventos canónicos.
     /// `resumeID` continúa la conversación anterior cuando el CLI lo soporta.
-    /// `timeout` mata el proceso si el CLI se cuelga (sin señales durante ese tiempo).
+    /// `timeout` es de INACTIVIDAD: se reinicia con cada señal de vida del proceso.
+    /// Emite exactamente un `.finished` por ejecución.
     nonisolated static func stream(
         prompt: String,
         binary: String,
@@ -42,90 +46,94 @@ enum AgentRunner {
         resumeID: String? = nil,
         timeout: TimeInterval = 600
     ) -> AsyncStream<AgentEvent> {
-        AsyncStream { continuation in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        // Fail closed: sin capacidades conocidas no hay ejecución con permisos implícitos.
+        guard let capabilities = AgentCapabilities.forBinary(binary) else {
+            return refusalStream(String(localized: "CLI no soportada: \((binary as NSString).lastPathComponent). Fold solo ejecuta agentes con capacidades conocidas."))
+        }
+        if mode == .explore, !capabilities.guaranteedReadOnly {
+            return refusalStream(capabilities.readOnlyExplanation
+                ?? String(localized: "Este agente no garantiza un modo de solo lectura."))
+        }
+        guard let invocation = headlessInvocation(
+            binary: binary, prompt: prompt, mode: mode, resumeID: resumeID
+        ) else {
+            return refusalStream(String(localized: "CLI no soportada: \((binary as NSString).lastPathComponent)."))
+        }
 
-            let quoted = ShellRunner.quote(prompt)
-            let invocation = headlessCommand(
-                binary: binary, quotedPrompt: quoted, mode: mode, resumeID: resumeID
-            )
-            let parser = invocation.parser
-            process.arguments = ["-lc", invocation.command]
-            process.environment = ShellRunner.cleanEnvironment()
-            process.standardInput = FileHandle.nullDevice
-            if let cwd { process.currentDirectoryURL = cwd }
+        let process = SupervisedProcess(config: .init(
+            executable: binary,
+            arguments: invocation.arguments,
+            cwd: cwd,
+            inactivityTimeout: timeout,
+            hardTimeout: max(timeout * 4, 3600)
+        ))
+        let parser = invocation.parser
 
-            let out = Pipe()
-            let err = Pipe()
-            process.standardOutput = out
-            process.standardError = err
+        return AsyncStream { continuation in
+            // El .finished del parser (p. ej. "result" de claude) se retiene hasta
+            // conocer el estado terminal real del proceso: un solo .finished, veraz.
+            let box = FinishedBox()
 
-            let state = StreamState()
+            let pump = Task.detached {
+                for await event in process.events {
+                    switch event {
+                    case .stdoutLine(let line):
+                        let events: [AgentEvent] = switch parser {
+                        case .claudeJSON: parseClaudeLine(line)
+                        case .codexJSON: parseCodexLine(line)
+                        case .plainText: cleanRawLine(line).map { [.raw($0)] } ?? []
+                        }
+                        for event in events {
+                            if case .finished(let success, let result) = event {
+                                box.store(success: success, result: result)
+                            } else {
+                                box.markEmitted()
+                                continuation.yield(event)
+                            }
+                        }
 
-            out.fileHandleForReading.readabilityHandler = { handle in
-                let data = handle.availableData
-                guard !data.isEmpty else { return }
-                for line in state.appendStdout(data) {
-                    let events: [AgentEvent] = switch parser {
-                    case .claudeJSON: parseClaudeLine(line)
-                    case .codexJSON: parseCodexLine(line)
-                    case .plainText: cleanRawLine(line).map { [.raw($0)] } ?? []
+                    case .terminated(let result):
+                        switch result.state {
+                        case .succeeded:
+                            let stored = box.stored
+                            continuation.yield(.finished(
+                                success: stored?.success ?? true,
+                                result: stored?.result
+                            ))
+                        case .timedOut:
+                            continuation.yield(.finished(
+                                success: false,
+                                result: String(localized: "El agente no dio señales de vida durante \(Int(timeout / 60)) min y se detuvo la sesión.")
+                            ))
+                        case .cancelled:
+                            continuation.yield(.finished(
+                                success: false,
+                                result: String(localized: "Sesión cancelada.")
+                            ))
+                        case .failed(let code):
+                            // Si no llegó nada útil, el stderr es la explicación.
+                            if !box.emitted, !result.stderrTail.isEmpty {
+                                continuation.yield(.message(String(result.stderrTail.prefix(600))))
+                            }
+                            continuation.yield(.finished(
+                                success: false,
+                                result: box.stored?.result
+                                    ?? String(localized: "El agente terminó con código \(code).")
+                            ))
+                        default:
+                            continuation.yield(.finished(success: false, result: nil))
+                        }
+                        continuation.finish()
                     }
-                    for event in events {
-                        state.markEmitted()
-                        continuation.yield(event)
-                    }
                 }
-            }
-
-            err.fileHandleForReading.readabilityHandler = { handle in
-                let data = handle.availableData
-                guard !data.isEmpty else { return }
-                state.appendStderr(data)
-            }
-
-            // Watchdog: si el proceso sigue vivo pasado el timeout, se termina.
-            let watchdog = DispatchWorkItem {
-                if process.isRunning {
-                    state.markTimedOut()
-                    process.terminate()
-                }
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
-
-            process.terminationHandler = { proc in
-                watchdog.cancel()
-                out.fileHandleForReading.readabilityHandler = nil
-                err.fileHandleForReading.readabilityHandler = nil
-                if state.didTimeOut {
-                    continuation.yield(.finished(
-                        success: false,
-                        result: String(localized: "El agente no respondió en \(Int(timeout / 60)) min y se detuvo la sesión.")
-                    ))
-                    continuation.finish()
-                    return
-                }
-                // Si el agente no produjo nada útil, el error (stderr) es la respuesta.
-                if !state.hasEmitted, let stderrText = state.stderrText() {
-                    continuation.yield(.message(stderrText))
-                }
-                continuation.yield(.finished(success: proc.terminationStatus == 0, result: nil))
-                continuation.finish()
             }
 
             continuation.onTermination = { _ in
-                watchdog.cancel()
-                if process.isRunning { process.terminate() }
+                pump.cancel()
+                Task.detached { await process.cancel() }
             }
 
-            do {
-                try process.run()
-            } catch {
-                watchdog.cancel()
-                continuation.yield(.finished(success: false, result: error.localizedDescription))
-                continuation.finish()
-            }
+            process.start()
         }
     }
 
@@ -156,49 +164,57 @@ enum AgentRunner {
         return reply.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: - Comandos headless por agente
+    /// Stream que rechaza la operación con una explicación: fail closed, sin proceso.
+    nonisolated private static func refusalStream(_ reason: String) -> AsyncStream<AgentEvent> {
+        AsyncStream { continuation in
+            continuation.yield(.finished(success: false, result: reason))
+            continuation.finish()
+        }
+    }
 
-    /// Modo headless de cada CLI soportada, con su parser de salida,
-    /// permisos por modo y reanudación de sesión.
-    nonisolated private static func headlessCommand(
+    // MARK: - Invocación headless por agente (argv directo, sin shell)
+
+    nonisolated private static func headlessInvocation(
         binary: String,
-        quotedPrompt: String,
+        prompt: String,
         mode: AgentMode,
         resumeID: String?
-    ) -> (command: String, parser: Parser) {
-        let name = (binary as NSString).lastPathComponent
-        let quotedBinary = ShellRunner.quote(binary)
-        switch name {
+    ) -> (arguments: [String], parser: Parser)? {
+        switch (binary as NSString).lastPathComponent {
         case "claude":
             // Fold hereda la sesión del CLI, nunca gestiona API keys
             // (el entorno ya llega saneado de variables ANTHROPIC_*/CLAUDE*).
-            var flags = "--output-format stream-json --verbose"
-            flags += mode == .work ? " --permission-mode acceptEdits" : " --permission-mode plan"
-            if let resumeID { flags += " --resume \(ShellRunner.quote(resumeID))" }
-            return ("\(quotedBinary) -p \(quotedPrompt) \(flags)", .claudeJSON)
+            var args = ["-p", prompt, "--output-format", "stream-json", "--verbose"]
+            args += ["--permission-mode", mode == .work ? "acceptEdits" : "plan"]
+            if let resumeID { args += ["--resume", resumeID] }
+            return (args, .claudeJSON)
 
         case "codex":
             let sandbox = mode == .work ? "workspace-write" : "read-only"
             if let resumeID {
                 // El subcomando resume no acepta -s: el sandbox va por config (-c).
-                let flags = "--json --skip-git-repo-check -c \(ShellRunner.quote("sandbox_mode=\"\(sandbox)\""))"
-                return ("\(quotedBinary) exec resume \(flags) \(ShellRunner.quote(resumeID)) \(quotedPrompt)", .codexJSON)
+                return (["exec", "resume", "--json", "--skip-git-repo-check",
+                         "-c", "sandbox_mode=\"\(sandbox)\"", resumeID, prompt], .codexJSON)
             }
-            return ("\(quotedBinary) exec --json --skip-git-repo-check -s \(sandbox) \(quotedPrompt)", .codexJSON)
+            return (["exec", "--json", "--skip-git-repo-check", "-s", sandbox, prompt], .codexJSON)
 
         case "cursor-agent":
-            var flags = "--output-format text"
-            if mode == .work { flags += " -f" }
-            if let resumeID { flags += " --resume \(ShellRunner.quote(resumeID))" }
-            return ("\(quotedBinary) -p \(quotedPrompt) \(flags)", .plainText)
+            // Solo modo work: explorar se rechaza antes (sin read-only garantizado).
+            var args = ["-p", prompt, "--output-format", "text"]
+            if mode == .work { args.append("-f") }
+            if let resumeID { args += ["--resume", resumeID] }
+            return (args, .plainText)
 
         case "opencode":
-            var flags = ""
-            if let resumeID { flags = "-s \(ShellRunner.quote(resumeID)) " }
-            return ("\(quotedBinary) run \(flags)\(quotedPrompt)", .plainText)
+            // Explorar usa el agente integrado "plan": sin herramientas de escritura.
+            var args = ["run"]
+            if mode == .explore { args += ["--agent", "plan"] }
+            if let resumeID { args += ["-s", resumeID] }
+            args.append(prompt)
+            return (args, .plainText)
 
         default:
-            return ("\(quotedBinary) \(quotedPrompt)", .plainText)
+            return nil
         }
     }
 
@@ -216,7 +232,7 @@ enum AgentRunner {
 
     // MARK: - Traducción del stream-json de Claude Code
 
-    nonisolated private static func parseClaudeLine(_ line: String) -> [AgentEvent] {
+    nonisolated static func parseClaudeLine(_ line: String) -> [AgentEvent] {
         guard let json = decodeJSON(line), let type = json["type"] as? String else { return [] }
 
         switch type {
@@ -276,7 +292,7 @@ enum AgentRunner {
 
     // MARK: - Traducción del JSONL de Codex (exec --json)
 
-    nonisolated private static func parseCodexLine(_ line: String) -> [AgentEvent] {
+    nonisolated static func parseCodexLine(_ line: String) -> [AgentEvent] {
         guard let json = decodeJSON(line), let type = json["type"] as? String else { return [] }
 
         switch type {
@@ -327,7 +343,7 @@ enum AgentRunner {
             let message = (json["error"] as? [String: Any])?["message"] as? String
                 ?? json["message"] as? String
                 ?? String(localized: "El agente terminó con un error.")
-            return [.message(message)]
+            return [.message(message), .finished(success: false, result: message)]
 
         default:
             return []
@@ -343,69 +359,32 @@ enum AgentRunner {
     }
 }
 
-/// Estado compartido del stream: buffer de líneas, stderr y si ya se emitió algo.
-nonisolated private final class StreamState: @unchecked Sendable {
-    private var pendingStdout = Data()
-    private var stderrData = Data()
-    private var emitted = false
+/// El .finished del parser se retiene hasta el estado terminal real del proceso.
+nonisolated private final class FinishedBox: @unchecked Sendable {
     private let lock = NSLock()
+    private var _stored: (success: Bool, result: String?)?
+    private var _emitted = false
 
-    private var timedOut = false
+    var stored: (success: Bool, result: String?)? {
+        lock.lock(); defer { lock.unlock() }
+        return _stored
+    }
 
-    var hasEmitted: Bool {
+    var emitted: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _emitted
+    }
+
+    func store(success: Bool, result: String?) {
         lock.lock()
-        defer { lock.unlock() }
-        return emitted
+        // El primer resultado con texto gana; un fallo posterior no se pisa por un éxito.
+        if _stored == nil || (_stored?.success == true && !success) {
+            _stored = (success, result)
+        }
+        lock.unlock()
     }
 
     func markEmitted() {
-        lock.lock()
-        emitted = true
-        lock.unlock()
-    }
-
-    var didTimeOut: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return timedOut
-    }
-
-    func markTimedOut() {
-        lock.lock()
-        timedOut = true
-        lock.unlock()
-    }
-
-    func appendStdout(_ data: Data) -> [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        pendingStdout.append(data)
-        var lines: [String] = []
-        while let newlineIndex = pendingStdout.firstIndex(of: UInt8(ascii: "\n")) {
-            let lineData = pendingStdout.prefix(upTo: newlineIndex)
-            if let line = String(data: lineData, encoding: .utf8), !line.isEmpty {
-                lines.append(line)
-            }
-            pendingStdout.removeSubrange(...newlineIndex)
-        }
-        return lines
-    }
-
-    func appendStderr(_ data: Data) {
-        lock.lock()
-        stderrData.append(data)
-        lock.unlock()
-    }
-
-    /// El stderr filtrado (sin trazas de log), si contiene algo legible.
-    func stderrText() -> String? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let raw = String(data: stderrData, encoding: .utf8) else { return nil }
-        let lines = raw.components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && !$0.contains("ERROR rmcp") && !$0.hasPrefix("20") }
-        let text = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : String(text.prefix(600))
+        lock.lock(); _emitted = true; lock.unlock()
     }
 }

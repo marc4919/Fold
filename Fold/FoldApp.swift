@@ -31,9 +31,11 @@ struct FoldApp: App {
                 .environment(appState)
                 .frame(minWidth: 1180, minHeight: 740)
                 .task {
+                    // El PATH de login se captura una vez; los spawns directos lo heredan.
+                    await ProcessEnvironment.captureLoginPATH()
                     appState.detectedAgents = await AgentDetector.detect()
-                    _ = try? await UNUserNotificationCenter.current()
-                        .requestAuthorization(options: [.alert, .sound])
+                    // El permiso de notificaciones se pide en contexto (al lanzar
+                    // la primera sesión de trabajo), no en el arranque.
                 }
         }
         .defaultSize(width: 1280, height: 800)

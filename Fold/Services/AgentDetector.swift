@@ -77,10 +77,15 @@ enum AgentDetector {
             }
         }
 
+        // Autenticación real: --version no basta. nil = no verificable.
+        let isAuthenticated = await AgentCapabilities.forBinary(binaryPath)?
+            .verifyAuthentication(binary: binaryPath)
+
         return AgentCLI(
             id: candidate.id, name: candidate.name,
             abbreviation: candidate.abbreviation, version: version,
-            isDetected: true, binaryPath: binaryPath
+            isDetected: true, binaryPath: binaryPath,
+            isAuthenticated: isAuthenticated
         )
     }
 }

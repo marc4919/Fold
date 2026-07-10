@@ -11,9 +11,25 @@ struct AgentCLI: Identifiable {
     var isDefault = false
     /// Ruta real del binario en la máquina (detección real).
     var binaryPath: String?
+    /// Autenticación real comprobada (llavero/credenciales/comando de estado).
+    /// nil = no verificable sin gastar tokens.
+    var isAuthenticated: Bool?
 
     var versionLabel: String {
         if let version { "\(name) \(version)" } else { name }
+    }
+
+    var capabilities: AgentCapabilities? {
+        binaryPath.flatMap { AgentCapabilities.forBinary($0) }
+    }
+
+    /// Etiqueta honesta del estado de sesión para la UI.
+    var authLabel: String {
+        switch isAuthenticated {
+        case .some(true): String(localized: "sesión activa")
+        case .some(false): String(localized: "sin sesión — requiere login")
+        case .none: String(localized: "sesión sin verificar")
+        }
     }
 }
 

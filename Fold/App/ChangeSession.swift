@@ -795,7 +795,15 @@ final class ChangeSession {
         isPaused = false
 
         if canRunAgent, let binary = agentBinary {
+            requestNotificationPermissionIfNeeded()
             startRealWork(binary: binary)
+            return
+        }
+        // La simulación existe SOLO en la demo. Un proyecto real sin agente
+        // no finge trabajo: se queda donde está y lo dice.
+        guard !isReal else {
+            terminalLines.append(String(localized: "⏺ sin agente configurado — configura una CLI para implementar"))
+            toasts?.show(String(localized: "No hay agente disponible: configura una CLI para implementar"))
             return
         }
         startSimulatedWork(resume: resume)
@@ -1015,6 +1023,18 @@ final class ChangeSession {
             identifier: UUID().uuidString, content: content, trigger: nil
         )
         UNUserNotificationCenter.current().add(request)
+    }
+
+    /// El permiso de notificaciones se pide en contexto: la primera vez que se
+    /// lanza una sesión de trabajo larga (es cuando la notificación aporta algo).
+    func requestNotificationPermissionIfNeeded() {
+        Task {
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            if settings.authorizationStatus == .notDetermined {
+                _ = try? await UNUserNotificationCenter.current()
+                    .requestAuthorization(options: [.alert, .sound])
+            }
+        }
     }
 
     // MARK: - Revisión real

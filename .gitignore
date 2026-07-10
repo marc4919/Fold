@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Xcode — estado personal del usuario (nunca se versiona)
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# Builds y datos derivados
+.build/
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# SwiftPM (el Package.resolved del workspace SÍ se versiona)
+.swiftpm/
+
+# Logs y temporales
+*.log
+*.tmp
+
+# Release artifacts locales (se generan con scripts/release.sh)
+dist/
+
+# Documentos personales del directorio de trabajo
+Propuesta-Taller-IA.pdf

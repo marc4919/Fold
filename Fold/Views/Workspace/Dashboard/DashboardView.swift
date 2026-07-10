@@ -45,9 +45,8 @@ struct DashboardView: View {
         .alert("Editar título", isPresented: $showRename) {
             TextField("Título del change", text: $renameText)
             Button("Guardar") {
-                if !renameText.trimmingCharacters(in: .whitespaces).isEmpty {
-                    session.change.title = renameText
-                }
+                // El título persiste en el heading de proposal.md, no solo en memoria.
+                session.renameChange(to: renameText)
             }
             Button("Cancelar", role: .cancel) {}
         }

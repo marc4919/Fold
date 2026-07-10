@@ -160,10 +160,13 @@ struct ProjectSetupView: View {
     private func runRealMemoryCheck(url: URL) async {
         setState(2, .running)
         try? await Task.sleep(for: .seconds(0.5))
-        let memoryDir = url.appendingPathComponent(".workspace/memory")
-        try? FileManager.default.createDirectory(at: memoryDir, withIntermediateDirectories: true)
+        // Solo LECTURA: el setup no escribe nada sin confirmación. El directorio
+        // de memoria se crea perezosamente al guardar la primera entrada.
         let entries = MemoryService.read(at: url)
-        setDone(2, detail: String(localized: ".workspace/memory/ listo · \(entries.count) entradas indexadas"))
+        let exists = FileManager.default.fileExists(atPath: url.appendingPathComponent(".workspace/memory").path)
+        setDone(2, detail: exists
+            ? String(localized: ".workspace/memory/ · \(entries.count) entradas indexadas")
+            : String(localized: "sin memoria todavía — se creará con la primera entrada"))
         finishSetup()
     }
 

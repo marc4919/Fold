@@ -379,13 +379,24 @@ final class ChangeSession {
         }
 
         guard canRunAgent, let binary = agentBinary else {
-            Task {
-                try? await Task.sleep(for: .seconds(0.9))
+            if isReal {
+                // Sin agente no hay exploración: se dice claro, sin fingir respuesta.
                 withAnimation(.smooth(duration: 0.25)) {
-                    self.chatMessages.append(ExploreMessage(
+                    chatMessages.append(ExploreMessage(
                         author: .agent,
-                        text: String(localized: "Anotado. Lo incorporo a la exploración — cuando quieras, aterriza la idea y seguimos.")
+                        text: String(localized: "No hay ningún agente disponible para explorar. Instala e inicia sesión en una CLI (Claude Code, Codex u OpenCode) y selecciónala en Configuración — este proyecto está en modo lectura hasta entonces.")
                     ))
+                }
+            } else {
+                // La demo responde como demo, sin hacerse pasar por un agente real.
+                Task {
+                    try? await Task.sleep(for: .seconds(0.9))
+                    withAnimation(.smooth(duration: 0.25)) {
+                        self.chatMessages.append(ExploreMessage(
+                            author: .agent,
+                            text: String(localized: "(demo) Anotado. En un proyecto real, aquí exploraría el repo con el agente.")
+                        ))
+                    }
                 }
             }
             return
@@ -645,7 +656,12 @@ final class ChangeSession {
 
     func generatePlan() {
         guard canRunAgent, let binary = agentBinary else {
-            advance(to: .planned)
+            if isReal {
+                // Sin agente no se finge un plan: el estado no avanza.
+                toasts?.show(String(localized: "No hay agente disponible para generar el plan — configura una CLI en Configuración"))
+            } else {
+                advance(to: .planned)
+            }
             return
         }
         isGeneratingPlan = true
@@ -806,6 +822,48 @@ final class ChangeSession {
         }
         if workingDirURL == nil || workingDirURL == projectURL {
             realInfo = fresh
+        }
+    }
+
+    /// Renombra el change: el título vive en el heading de proposal.md,
+    /// así que se persiste ahí — no solo en memoria.
+    func renameChange(to newTitle: String) {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        change.title = trimmed
+        guard isReal, let info = liveChangeInfo else { return }
+
+        var lines = (fileContents[.proposal]?.content ?? info.proposal ?? "")
+            .components(separatedBy: "\n")
+        if let index = lines.firstIndex(where: { $0.hasPrefix("# ") }) {
+            lines[index] = "# \(trimmed)"
+        } else {
+            lines.insert("# \(trimmed)", at: 0)
+        }
+        let proposal = lines.joined(separator: "\n")
+        persist("proposal.md") {
+            try OpenSpecService.saveFile(named: "proposal.md", content: proposal, in: info)
+        }
+        reloadFromDisk()
+    }
+
+    /// Guarda un archivo del change en el árbol VIVO (worktree durante Trabajo,
+    /// árbol principal si no). Devuelve el error si falla — quien llama decide
+    /// no cerrar el editor ni descartar el borrador.
+    func saveChangeFile(named name: String, content: String) -> String? {
+        guard isReal else {
+            return String(localized: "En la demo los archivos no se guardan en ningún repo.")
+        }
+        guard let info = liveChangeInfo else {
+            return String(localized: "El change ya no existe en el disco.")
+        }
+        do {
+            try OpenSpecService.saveFile(named: name, content: content, in: info)
+            // tasks.md editado → el estado de las tasks se re-parsea al momento.
+            reloadFromDisk()
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
 

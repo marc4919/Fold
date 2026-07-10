@@ -55,17 +55,19 @@ struct ProjectSelectorView: View {
 
             Spacer()
 
+            // Métricas REALES de esta máquina: recientes, CLIs detectadas y
+            // archives contados en disco — nada de números de la demo.
             HStack(spacing: 36) {
                 stat(
-                    value: recents.isEmpty ? SampleData.globalStats.openProjects : recents.count,
-                    label: String(localized: "proyectos abiertos")
+                    value: recents.count,
+                    label: String(localized: "proyectos recientes")
                 )
                 stat(
                     value: detectedCount,
                     label: String(localized: "agentes detectados")
                 )
                 stat(
-                    value: SampleData.globalStats.totalArchives,
+                    value: totalArchives,
                     label: String(localized: "archives totales")
                 )
             }
@@ -74,8 +76,17 @@ struct ProjectSelectorView: View {
     }
 
     private var detectedCount: Int {
-        let detected = appState.detectedAgents.filter(\.isDetected).count
-        return appState.detectedAgents.isEmpty ? SampleData.globalStats.detectedAgents : detected
+        appState.detectedAgents.filter(\.isDetected).count
+    }
+
+    private var totalArchives: Int {
+        recents.reduce(0) { total, project in
+            let archive = URL(fileURLWithPath: project.path)
+                .appendingPathComponent("openspec/changes/archive")
+            let count = (try? FileManager.default.contentsOfDirectory(atPath: archive.path))?
+                .filter { !$0.hasPrefix(".") }.count ?? 0
+            return total + count
+        }
     }
 
     private func stat(value: Int, label: String) -> some View {

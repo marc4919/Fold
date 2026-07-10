@@ -180,9 +180,11 @@ final class AppState {
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
+    /// Solo agentes con autenticación no-fallida: un agente sin sesión no se
+    /// selecciona en silencio (fail closed; la UI explica cómo hacer login).
     var defaultAgentBinary: String? {
-        detectedAgents.first(where: { $0.isDefault && $0.isDetected })?.binaryPath
-            ?? detectedAgents.first(where: \.isDetected)?.binaryPath
+        let usable = detectedAgents.filter { $0.isDetected && $0.isAuthenticated != false }
+        return usable.first(where: \.isDefault)?.binaryPath ?? usable.first?.binaryPath
     }
 
     var memoryEntries: [MemoryEntry] {

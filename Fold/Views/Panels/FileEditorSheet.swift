@@ -54,19 +54,22 @@ struct FileEditorSheet: View {
                     .buttonStyle(.glass)
                     .keyboardShortcut(.cancelAction)
                 Button("Guardar y cerrar") {
-                    appState.session?.fileContents[fileKey]?.content = text
-                    if let session = appState.session,
-                       let info = session.realInfo,
-                       let name = file?.name, name.hasSuffix(".md") {
-                        do {
-                            try OpenSpecService.saveFile(named: name, content: text, in: info)
-                            appState.refreshRealProject()
-                            appState.toasts.show(String(localized: "\(name) guardado en el repo"))
-                        } catch {
-                            appState.toasts.show(String(localized: "No se pudo guardar: \(error.localizedDescription)"))
+                    guard let session = appState.session, let name = file?.name else {
+                        dismiss()
+                        return
+                    }
+                    if session.isReal {
+                        // Escribe en el árbol vivo (worktree durante Trabajo).
+                        // Si falla, el editor NO se cierra y el borrador se conserva.
+                        if let error = session.saveChangeFile(named: name, content: text) {
+                            appState.toasts.show(String(localized: "No se pudo guardar: \(error)"))
+                            return
                         }
+                        appState.refreshRealProject()
+                        appState.toasts.show(String(localized: "\(name) guardado en el repo"))
                     } else {
-                        appState.toasts.show(String(localized: "\(file?.name ?? "archivo") guardado"))
+                        session.fileContents[fileKey]?.content = text
+                        appState.toasts.show(String(localized: "(demo) \(name) editado solo en memoria"))
                     }
                     dismiss()
                 }

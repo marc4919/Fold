@@ -225,6 +225,27 @@ final class GitChangeTransactionTests: XCTestCase {
         XCTAssertTrue(reason.contains("commit"))
     }
 
+    func testSetupWorktreePlanCommitExcludesUserPreStaged() async throws {
+        try await makeRepo()
+        // El usuario tenía algo staged ANTES de que Fold commitee el plan.
+        try "trabajo del usuario".write(to: root.appendingPathComponent("usuario.txt"), atomically: true, encoding: .utf8)
+        _ = await git("add usuario.txt")
+
+        let setup = await GitService.setupWorktree(root: root, changeID: "mi-change")
+        guard case .success = setup else { return XCTFail("setupWorktree falló") }
+
+        // El commit del plan NO puede llevarse usuario.txt.
+        let planCommit = await git("log --format=%H -n 1 --grep 'opsx: plan'")
+        if !planCommit.trimmedOutput.isEmpty {
+            let files = await git("show --name-only --format= \(planCommit.trimmedOutput)")
+            XCTAssertFalse(files.stdout.contains("usuario.txt"),
+                           "el commit del plan se tragó lo pre-staged del usuario")
+        }
+        // Y usuario.txt sigue staged, esperando al usuario.
+        let status = await GitChangeTransaction.status(at: root)
+        XCTAssertTrue(status.contains { $0.path == "usuario.txt" && $0.hasStagedChanges })
+    }
+
     func testSetupWorktreeReusesResidualBranchWithoutReset() async throws {
         try await makeRepo()
         // Rama residual con un commit propio.

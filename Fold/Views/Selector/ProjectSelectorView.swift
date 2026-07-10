@@ -7,6 +7,7 @@ struct ProjectSelectorView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \PersistentProject.lastOpenedAt, order: .reverse) private var recents: [PersistentProject]
+    @State private var totalArchives = 0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -27,6 +28,7 @@ struct ProjectSelectorView: View {
             actions
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .task(id: recents.count) { await countArchives() }
     }
 
     // MARK: - Izquierda: marca y estado
@@ -79,14 +81,20 @@ struct ProjectSelectorView: View {
         appState.detectedAgents.filter(\.isDetected).count
     }
 
-    private var totalArchives: Int {
-        recents.reduce(0) { total, project in
-            let archive = URL(fileURLWithPath: project.path)
-                .appendingPathComponent("openspec/changes/archive")
-            let count = (try? FileManager.default.contentsOfDirectory(atPath: archive.path))?
-                .filter { !$0.hasPrefix(".") }.count ?? 0
-            return total + count
-        }
+    /// El conteo toca el disco (y puede disparar el consentimiento TCC de
+    /// carpetas protegidas): SIEMPRE fuera del MainActor, nunca en el body.
+    private func countArchives() async {
+        let paths = recents.map(\.path)
+        let total = await Task.detached(priority: .utility) {
+            paths.reduce(0) { total, path in
+                let archive = URL(fileURLWithPath: path)
+                    .appendingPathComponent("openspec/changes/archive")
+                let count = (try? FileManager.default.contentsOfDirectory(atPath: archive.path))?
+                    .filter { !$0.hasPrefix(".") }.count ?? 0
+                return total + count
+            }
+        }.value
+        totalArchives = total
     }
 
     private func stat(value: Int, label: String) -> some View {

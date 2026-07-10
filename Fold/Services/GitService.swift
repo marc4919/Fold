@@ -29,9 +29,11 @@ enum GitService {
         }
 
         // Los artefactos de planning forman parte del registro: se commitean
-        // (solo el directorio del change, nunca add -A).
+        // con PATHSPEC en add Y commit — sin él, `git commit` se llevaría todo
+        // el índice, incluido lo que el usuario tuviera staged de antes.
+        let planPath = "openspec/changes/\(ShellRunner.quote(changeID))"
         _ = await ShellRunner.run(
-            "git add openspec/changes/\(ShellRunner.quote(changeID)) && git commit -q -m \(ShellRunner.quote("opsx: plan de \(changeID)")) 2>/dev/null",
+            "git add -- \(planPath) && git commit -q -m \(ShellRunner.quote("opsx: plan de \(changeID)")) -- \(planPath) 2>/dev/null",
             cwd: root
         )
 

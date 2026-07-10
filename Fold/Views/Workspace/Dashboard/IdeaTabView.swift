@@ -116,7 +116,12 @@ struct IdeaTabView: View {
                     ? String(localized: "ninguno todavía")
                     : "\(session.change.artifacts.count) · \(session.change.artifacts.first?.name ?? "")"
             )
-            metaRow(label: String(localized: "Agente"), value: session.change.agentLabel)
+            // El agente VIVO de la sesión, no el que había al crear el change.
+            metaRow(
+                label: String(localized: "Agente"),
+                value: session.agentBinary.map { ($0 as NSString).lastPathComponent }
+                    ?? String(localized: "ninguno disponible")
+            )
         }
         .foldCard()
     }

@@ -98,6 +98,8 @@ enum AgentRunner {
         ))
         handle?.attach(process)
         let parser = invocation.parser
+        // Redactado: binario, modo y nº de args — nunca el prompt.
+        FoldLog.log("agent.start \((binary as NSString).lastPathComponent) mode=\(mode) args=\(invocation.arguments.count) cwd=\(cwd?.lastPathComponent ?? "-")")
 
         return AsyncStream { continuation in
             // El .finished del parser (p. ej. "result" de claude) se retiene hasta
@@ -123,6 +125,7 @@ enum AgentRunner {
                         }
 
                     case .terminated(let result):
+                        FoldLog.log("agent.end \((binary as NSString).lastPathComponent) state=\(result.state) stderr=\(String(result.stderrTail.prefix(200)))")
                         switch result.state {
                         case .succeeded:
                             let stored = box.stored

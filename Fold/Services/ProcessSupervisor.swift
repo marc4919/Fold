@@ -123,10 +123,21 @@ nonisolated final class SupervisedProcess: @unchecked Sendable {
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP))
         posix_spawnattr_setpgroup(&attributes, 0)
 
+        // PWD debe contar la verdad: hay CLIs (p. ej. opencode) que detectan la
+        // raíz del proyecto por $PWD y no por el cwd real. Un PWD heredado de
+        // quien lanzó la app apuntaría al repo equivocado.
+        var environment = config.environment
+        if let cwd = config.cwd {
+            environment["PWD"] = cwd.path
+        } else {
+            environment.removeValue(forKey: "PWD")
+        }
+        environment.removeValue(forKey: "OLDPWD")
+
         let argv: [UnsafeMutablePointer<CChar>?] =
             ([config.executable] + config.arguments).map { strdup($0) } + [nil]
         let envp: [UnsafeMutablePointer<CChar>?] =
-            config.environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
+            environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer {
             argv.forEach { free($0) }
             envp.forEach { free($0) }

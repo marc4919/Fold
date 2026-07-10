@@ -736,6 +736,15 @@ final class ChangeSession {
                 reloadFromDisk()
             case .toolUse(let name, _):
                 planProgressText = String(localized: "Analizando el repo (\(name))…")
+            case .finished(let success, let result):
+                // Un fallo del agente se VE: toast + bitácora, nunca silencio.
+                if !success {
+                    let reason = result ?? String(localized: "El agente terminó sin generar el plan.")
+                    toasts?.show(String(localized: "El plan falló: \(String(reason.prefix(180)))"))
+                    logEvent(stage: "plan", actor: .system,
+                             text: String(localized: "La generación del plan falló"),
+                             detail: reason)
+                }
             default: break
             }
         }

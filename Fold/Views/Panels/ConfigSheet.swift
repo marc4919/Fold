@@ -7,13 +7,6 @@ struct ConfigSheet: View {
 
     @State private var tab = "agents"
     @State private var clis = SampleData.clis
-    @State private var telemetry = UserDefaults.standard.bool(forKey: "telemetryEnabled")
-    @State private var mcpServers: [String: Bool] = {
-        if let stored = UserDefaults.standard.dictionary(forKey: "mcpServers") as? [String: Bool] {
-            return stored
-        }
-        return ["GitHub": true, "Postgres MCP": true, "Filesystem (sandbox)": true, "Linear": false]
-    }()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -96,9 +89,11 @@ struct ConfigSheet: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(cli.name)
                                 .font(.body.weight(.medium))
-                            Text(cli.isDetected ? cli.versionLabel : String(localized: "no instalado"))
+                            Text(cli.isDetected
+                                 ? "\(cli.versionLabel) · \(cli.authLabel)"
+                                 : String(localized: "no instalado"))
                                 .font(.caption2.monospaced())
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(cli.isAuthenticated == false ? AnyShapeStyle(Color.foldDanger) : AnyShapeStyle(.tertiary))
                         }
 
                         Spacer()
@@ -232,49 +227,28 @@ struct ConfigSheet: View {
 
     // MARK: - Conectores
 
+    /// Sin controles ficticios: los conectores MCP no existen todavía en Fold,
+    /// así que aquí no hay toggles que fingir. Los agentes usan los MCP que ya
+    /// tengan configurados en sus propias CLIs.
     private var connectorsPane: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Los conectores se conectan aquí, no se forjan. El login lo haces tú, nunca el agente.")
+            HStack(spacing: 10) {
+                Image(systemName: "server.rack")
+                    .foregroundStyle(.tertiary)
+                Text("Conectores MCP — todavía no disponible")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Fold no gestiona conectores MCP propios en esta beta. Cada CLI de agente usa los servidores MCP que tengas configurados en ella (p. ej. `claude mcp add …` o la config de Codex). La gestión desde Fold llegará con la integración ACP.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
-            VStack(spacing: 6) {
-                ForEach(mcpServers.keys.sorted(), id: \.self) { server in
-                    HStack {
-                        Image(systemName: "server.rack")
-                            .foregroundStyle(.secondary)
-                        Text(server)
-                            .font(.callout)
-                        Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { mcpServers[server] ?? false },
-                            set: {
-                                mcpServers[server] = $0
-                                UserDefaults.standard.set(mcpServers, forKey: "mcpServers")
-                            }
-                        ))
-                        .toggleStyle(.switch)
-                        .labelsHidden()
-                        .controlSize(.small)
-                    }
-                    .padding(12)
-                    .background(.background.secondary, in: .rect(cornerRadius: 10))
-                }
-            }
-
-            Text("La preferencia se guarda; la conexión real de MCP a los agentes llegará con la integración ACP.")
-                .font(.caption2)
+            Text("Fold es local-first: no hay telemetría y no se envía nada fuera de tu máquina.")
+                .font(.caption)
                 .foregroundStyle(.tertiary)
-
-            Toggle("Telemetría anónima (reservado — Fold no envía nada todavía)", isOn: Binding(
-                get: { telemetry },
-                set: {
-                    telemetry = $0
-                    UserDefaults.standard.set($0, forKey: "telemetryEnabled")
-                }
-            ))
-            .toggleStyle(.switch)
-            .padding(.top, 6)
+                .padding(.top, 6)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

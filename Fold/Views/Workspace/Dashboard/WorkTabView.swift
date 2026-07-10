@@ -8,17 +8,7 @@ struct WorkTabView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             toolbar
-
-            Group {
-                if appState.frugalMode || session.isReal || session.workMode == .stream {
-                    WorkStreamView(session: session)
-                        .transition(.opacity)
-                } else {
-                    OrchestrationView(session: session)
-                        .transition(.opacity)
-                }
-            }
-            .animation(.smooth(duration: 0.25), value: session.workMode)
+            WorkStreamView(session: session)
         }
         .padding(.horizontal, 32)
         .padding(.bottom, 24)
@@ -26,17 +16,8 @@ struct WorkTabView: View {
 
     private var toolbar: some View {
         HStack {
-            if !appState.frugalMode, !session.isReal {
-                Picker("Modo", selection: $session.workMode) {
-                    Label("Stream único", systemImage: "list.bullet.rectangle")
-                        .tag(WorkMode.stream)
-                    Label("Orquestación de agentes · 3", systemImage: "arrow.triangle.branch")
-                        .tag(WorkMode.agents)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-            } else {
+            // El badge de ahorro solo aparece cuando el modo está activo de verdad.
+            if appState.frugalMode {
                 Label("modo ahorro · stream en texto plano", systemImage: "leaf")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 9)

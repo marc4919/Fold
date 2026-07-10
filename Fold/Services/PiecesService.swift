@@ -27,16 +27,46 @@ enum PiecesService {
         }
         groups.append(InventoryGroup(title: String(localized: "Skills"), pieces: skills))
 
-        // Agentes: las CLIs activas del usuario.
-        let agentPieces = agents.filter { $0.isSelected && $0.isDetected }.map { agent in
+        // Agentes: las CLIs activas del usuario + los perfiles forjados en .workspace/agents/.
+        var agentPieces = agents.filter { $0.isSelected && $0.isDetected }.map { agent in
             InventoryPiece(
                 name: agent.name,
-                detail: agent.versionLabel,
+                detail: agent.versionLabel + " · " + agent.authLabel,
                 badges: agent.isDefault ? ["activo", "default"] : ["activo"],
                 previewText: "CLI: \(agent.name)\nBinario: \(agent.binaryPath ?? "—")\nAuth: heredada de tu sesión de terminal"
             )
         }
+        let forgedAgentsURL = root.appendingPathComponent(".workspace/agents")
+        if let entries = try? FileManager.default.contentsOfDirectory(at: forgedAgentsURL, includingPropertiesForKeys: nil) {
+            for file in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where file.pathExtension == "md" {
+                let content = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+                agentPieces.append(InventoryPiece(
+                    name: file.deletingPathExtension().lastPathComponent,
+                    detail: firstParagraph(of: content) ?? String(localized: "perfil de agente forjado"),
+                    badges: ["perfil"],
+                    previewText: String(content.prefix(600))
+                ))
+            }
+        }
         groups.append(InventoryGroup(title: String(localized: "Agentes"), pieces: agentPieces))
+
+        // Plantillas forjadas: openspec/templates/.
+        var templates: [InventoryPiece] = []
+        let templatesURL = root.appendingPathComponent("openspec/templates")
+        if let entries = try? FileManager.default.contentsOfDirectory(at: templatesURL, includingPropertiesForKeys: nil) {
+            for file in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where file.pathExtension == "md" {
+                let content = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+                templates.append(InventoryPiece(
+                    name: file.deletingPathExtension().lastPathComponent,
+                    detail: firstParagraph(of: content) ?? String(localized: "plantilla de change"),
+                    badges: [],
+                    previewText: String(content.prefix(600))
+                ))
+            }
+        }
+        if !templates.isEmpty {
+            groups.append(InventoryGroup(title: String(localized: "Plantillas"), pieces: templates))
+        }
 
         // Workflows: el estándar OPSX (los personalizados vivirán en openspec/profiles/).
         var workflows = [InventoryPiece(
@@ -110,7 +140,11 @@ enum PiecesService {
 
         switch kind {
         case .skill:
-            let dir = root.appendingPathComponent(".workspace/skills/\(slug)")
+            // Colisión de slug = pieza existente: jamás se sobrescribe en silencio.
+            let unique = uniqueSlug(slug) { candidate in
+                manager.fileExists(atPath: root.appendingPathComponent(".workspace/skills/\(candidate)").path)
+            }
+            let dir = root.appendingPathComponent(".workspace/skills/\(unique)")
             try manager.createDirectory(at: dir, withIntermediateDirectories: true)
             let file = dir.appendingPathComponent("SKILL.md")
             try """
@@ -123,7 +157,7 @@ enum PiecesService {
             ## Qué hace
             -
             """.write(to: file, atomically: true, encoding: .utf8)
-            return ".workspace/skills/\(slug)/SKILL.md"
+            return ".workspace/skills/\(unique)/SKILL.md"
 
         case .rule:
             let file = root.appendingPathComponent("CLAUDE.md")
@@ -138,7 +172,8 @@ enum PiecesService {
         case .template:
             let dir = root.appendingPathComponent("openspec/templates")
             try manager.createDirectory(at: dir, withIntermediateDirectories: true)
-            let file = dir.appendingPathComponent("\(slug).md")
+            let unique = uniqueSlug(slug) { manager.fileExists(atPath: dir.appendingPathComponent("\($0).md").path) }
+            let file = dir.appendingPathComponent("\(unique).md")
             try """
             # Plantilla · \(name)
 
@@ -151,12 +186,13 @@ enum PiecesService {
             ## Tareas
             - [ ] 1.1
             """.write(to: file, atomically: true, encoding: .utf8)
-            return "openspec/templates/\(slug).md"
+            return "openspec/templates/\(unique).md"
 
         case .workflow:
             let dir = root.appendingPathComponent("openspec/profiles")
             try manager.createDirectory(at: dir, withIntermediateDirectories: true)
-            let file = dir.appendingPathComponent("\(slug).yaml")
+            let unique = uniqueSlug(slug) { manager.fileExists(atPath: dir.appendingPathComponent("\($0).yaml").path) }
+            let file = dir.appendingPathComponent("\(unique).yaml")
             try """
             # Workflow · \(name)
             # \(description)
@@ -167,12 +203,13 @@ enum PiecesService {
               - work
               - review
             """.write(to: file, atomically: true, encoding: .utf8)
-            return "openspec/profiles/\(slug).yaml"
+            return "openspec/profiles/\(unique).yaml"
 
         case .agent:
             let dir = root.appendingPathComponent(".workspace/agents")
             try manager.createDirectory(at: dir, withIntermediateDirectories: true)
-            let file = dir.appendingPathComponent("\(slug).md")
+            let unique = uniqueSlug(slug) { manager.fileExists(atPath: dir.appendingPathComponent("\($0).md").path) }
+            let file = dir.appendingPathComponent("\(unique).md")
             try """
             # Agente · \(name)
 
@@ -183,11 +220,19 @@ enum PiecesService {
             puede-tocar:
             aislamiento: worktree
             """.write(to: file, atomically: true, encoding: .utf8)
-            return ".workspace/agents/\(slug).md"
+            return ".workspace/agents/\(unique).md"
 
         case .schema:
             throw ForgeError.advancedNotAvailable
         }
+    }
+
+    /// Sufijo incremental hasta encontrar un slug libre (mismo patrón que los changes).
+    nonisolated private static func uniqueSlug(_ slug: String, exists: (String) -> Bool) -> String {
+        guard exists(slug) else { return slug }
+        var counter = 2
+        while exists("\(slug)-\(counter)") { counter += 1 }
+        return "\(slug)-\(counter)"
     }
 
     nonisolated enum ForgeError: LocalizedError {

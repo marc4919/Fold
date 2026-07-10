@@ -2,15 +2,6 @@ import SwiftUI
 import Observation
 import UserNotifications
 
-enum WorkMode {
-    case stream
-    case agents
-}
-
-enum ExecVerdict {
-    case parallel
-    case serial
-}
 
 /// Evento persistido del timeline del change (history.json en el change dir).
 nonisolated struct StoredHistoryEvent: Codable, Sendable {
@@ -72,11 +63,7 @@ final class ChangeSession {
     var isMerging = false
     var regeneratingVoice: ClosingVoice.Kind?
 
-    // Plan
-    var execVerdict: ExecVerdict = .parallel
-
     // Trabajo
-    var workMode: WorkMode = .stream
     var streamEvents: [StreamEvent] = []
     var terminalLines: [String] = []
     var sessionMinutes = 0
@@ -88,8 +75,6 @@ final class ChangeSession {
     /// Fin real de la sesión de trabajo (para la duración del Cierre).
     private(set) var sessionEnd: Date?
     var isPaused = false
-    var orchNodes: [OrchNode] = SampleData.orchNodes
-    var orchStep = 0
     private(set) var sessionStart: Date?
     /// Donde trabaja el agente: worktree aislado o el árbol principal.
     private(set) var workingDirURL: URL?
@@ -1505,33 +1490,4 @@ final class ChangeSession {
         }
     }
 
-    // MARK: - Orquestación (visualización demo)
-
-    /// Avanza la simulación del diagrama: cierra 2.1 → cierra 1.3 + merge listo → reinicia.
-    func orchAdvance() {
-        withAnimation(.spring(duration: 0.5)) {
-            switch orchStep {
-            case 0:
-                setOrchStatus("2.1", .done)
-                orchStep = 1
-            case 1:
-                setOrchStatus("1.3", .done)
-                setOrchStatus("merge", .done)
-                orchStep = 2
-            default:
-                orchNodes = SampleData.orchNodes
-                orchStep = 0
-            }
-        }
-    }
-
-    var orchClosedCount: Int {
-        orchNodes.filter { $0.column == .fan && $0.status == .done }.count
-    }
-
-    private func setOrchStatus(_ id: String, _ status: OrchNode.Status) {
-        if let index = orchNodes.firstIndex(where: { $0.id == id }) {
-            orchNodes[index].status = status
-        }
-    }
 }

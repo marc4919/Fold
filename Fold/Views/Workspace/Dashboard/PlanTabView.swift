@@ -33,9 +33,6 @@ struct PlanTabView: View {
                         proposalSection
                         designSection
                         tasksSection
-                        if !session.isReal {
-                            ExecStrategyView(session: session)
-                        }
                         deltasSection
                     }
                     // Mientras se genera, el plan se mira pero no se toca.

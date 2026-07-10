@@ -156,14 +156,14 @@ enum SampleData {
         ]),
         HistoryStage(name: String(localized: "Plan"), durationLabel: "3 eventos · 4 min", events: [
             HistoryEvent(actor: .agent, timeLabel: "14:04", text: "Generó proposal + design + tasks + deltas", detail: "/opsx:propose"),
-            HistoryEvent(actor: .agent, timeLabel: "14:06", text: "Veredicto de paralelización: 3 agentes", detail: "tronco 1.1–1.2 · abanico 1.3, 2.1, 2.2"),
+            HistoryEvent(actor: .agent, timeLabel: "14:06", text: "Plan de ejecución trazado", detail: "5 tasks en orden 1.1 → 2.2"),
             HistoryEvent(actor: .human, timeLabel: "14:08", text: "Aceptaste el plan e implementación"),
         ]),
         HistoryStage(name: String(localized: "Trabajo"), durationLabel: "6 eventos · 20 min", events: [
             HistoryEvent(actor: .system, timeLabel: "14:08", text: "Sesión iniciada en worktree aislado", detail: "run #1"),
             HistoryEvent(actor: .agent, timeLabel: "14:11", text: "Task 1.1 completada"),
             HistoryEvent(actor: .agent, timeLabel: "14:17", text: "Task 1.2 completada", detail: "apple_handler.go +92"),
-            HistoryEvent(actor: .agent, timeLabel: "14:23", text: "Tasks 1.3, 2.1, 2.2 en paralelo", detail: "3 agentes"),
+            HistoryEvent(actor: .agent, timeLabel: "14:23", text: "Tasks 1.3, 2.1 y 2.2 completadas", detail: "sesión única"),
             HistoryEvent(actor: .agent, timeLabel: "14:27", text: "Tests pasando en local", detail: "12/12"),
             HistoryEvent(actor: .system, timeLabel: "14:28", text: "Sesión terminada · lista para revisar"),
         ]),
@@ -346,7 +346,7 @@ enum SampleData {
             scopeLabel: "add-apple-login",
             authorityLabel: String(localized: "propuesto por claude-opus-4.7"),
             title: String(localized: "Plan de 5 tasks para Sign in with Apple"),
-            body: String(localized: "Proposal, design y tasks generados. El veredicto de paralelización recomienda 3 agentes: tronco secuencial 1.1–1.2 y abanico 1.3, 2.1, 2.2."),
+            body: String(localized: "Proposal, design y tasks generados. Las 5 tasks quedan listas para implementar en orden, empezando por la configuración."),
             consequenceTitle: String(localized: "Asunciones del plan a revisar"),
             consequences: [
                 String(localized: "El campo apple_sub se añade a la tabla users sin migración disruptiva."),
@@ -401,17 +401,6 @@ enum SampleData {
         StreamEvent(kind: .thought, text: "Los tests necesitan tokens firmados con una clave de prueba propia para no depender de Apple.", timeLabel: "14:19", terminalLine: "⏺ generando fixtures de test"),
         StreamEvent(kind: .fileCreated, text: "Tests de integración: token válido, expirado y con firma inválida.", timeLabel: "14:23", fileRow: .init(path: "internal/auth/apple_handler_test.go", added: 48, removed: 0), terminalLine: "⏺ write apple_handler_test.go"),
         StreamEvent(kind: .message, text: "Tests pasando 12/12. OpenAPI actualizada. Listo para revisión.", timeLabel: "14:27", terminalLine: "⏺ tests 12/12 ok"),
-    ]
-
-    // MARK: - Orquestación
-
-    static let orchNodes: [OrchNode] = [
-        OrchNode(id: "1.1", agentLabel: "tronco", taskLabel: "1.1 config", column: .trunk, status: .done, position: CGPoint(x: 110, y: 90)),
-        OrchNode(id: "1.2", agentLabel: "tronco", taskLabel: "1.2 endpoint", column: .trunk, status: .done, position: CGPoint(x: 110, y: 240)),
-        OrchNode(id: "1.3", agentLabel: "agente-A", taskLabel: "1.3 mapear sub", column: .fan, status: .running, position: CGPoint(x: 410, y: 60)),
-        OrchNode(id: "2.1", agentLabel: "agente-B", taskLabel: "2.1 tests", column: .fan, status: .running, position: CGPoint(x: 410, y: 165)),
-        OrchNode(id: "2.2", agentLabel: "agente-C", taskLabel: "2.2 openapi", column: .fan, status: .done, position: CGPoint(x: 410, y: 270)),
-        OrchNode(id: "merge", agentLabel: "convergencia", taskLabel: "conclusión", column: .merge, status: .pending, position: CGPoint(x: 700, y: 165)),
     ]
 
     // MARK: - Inventario

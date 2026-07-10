@@ -325,9 +325,6 @@ struct DashboardView: View {
             set: { newValue in
                 appState.frugalMode = newValue
                 session.isFrugal = newValue
-                if newValue {
-                    session.workMode = .stream
-                }
             }
         )
     }

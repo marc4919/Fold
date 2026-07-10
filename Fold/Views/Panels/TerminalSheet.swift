@@ -56,8 +56,27 @@ struct EmbeddedTerminal: NSViewRepresentable {
             environment: environment.map { "\($0.key)=\($0.value)" },
             execName: nil
         )
+        context.coordinator.shellPID = terminal.process.shellPid
         return terminal
     }
 
     func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {}
+
+    /// Cerrar el sheet termina la shell y sus descendientes: sin zsh huérfanas.
+    static func dismantleNSView(_ nsView: LocalProcessTerminalView, coordinator: Coordinator) {
+        let pid = coordinator.shellPID
+        guard pid > 0 else { return }
+        killpg(pid, SIGHUP)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if kill(pid, 0) == 0 {
+                killpg(pid, SIGKILL)
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var shellPID: pid_t = 0
+    }
 }

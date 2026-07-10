@@ -9,25 +9,72 @@ enum GitService {
             .trimmedOutput == "yes"
     }
 
-    /// Prepara el aislamiento de un change: commitea los artefactos de planning
-    /// y crea un worktree dedicado con rama propia. Devuelve la ruta del worktree.
-    nonisolated static func setupWorktree(root: URL, changeID: String) async -> URL? {
-        guard await hasHead(at: root) else { return nil }
+    /// Resultado del aislamiento: éxito con la ruta, o el motivo REAL del fallo.
+    nonisolated enum WorktreeSetup: Sendable {
+        case success(URL)
+        case failure(String)
+    }
 
-        // Los artefactos de planning forman parte del registro: se commitean.
+    /// Prepara el aislamiento de un change: commitea los artefactos de planning
+    /// y crea (o recupera) un worktree dedicado con rama propia.
+    /// Cada causa de fallo tiene su mensaje real — nunca se atribuye todo a
+    /// "repo sin commits" ni se resetea una rama residual con -B.
+    nonisolated static func setupWorktree(root: URL, changeID: String) async -> WorktreeSetup {
+        let isRepo = await ShellRunner.run("git rev-parse --is-inside-work-tree 2>/dev/null", cwd: root)
+        guard isRepo.trimmedOutput == "true" else {
+            return .failure(String(localized: "La carpeta no es un repositorio git — inicialízalo (git init) para poder aislar el trabajo."))
+        }
+        guard await hasHead(at: root) else {
+            return .failure(String(localized: "El repo no tiene ningún commit todavía: crea un commit inicial para poder aislar el trabajo."))
+        }
+
+        // Los artefactos de planning forman parte del registro: se commitean
+        // (solo el directorio del change, nunca add -A).
         _ = await ShellRunner.run(
             "git add openspec/changes/\(ShellRunner.quote(changeID)) && git commit -q -m \(ShellRunner.quote("opsx: plan de \(changeID)")) 2>/dev/null",
             cwd: root
         )
 
         let worktreePath = ".workspace/worktrees/\(changeID)"
+        let worktreeURL = root.appendingPathComponent(worktreePath)
         let branch = "fold/\(changeID)"
-        let result = await ShellRunner.run(
-            "git worktree add -B \(ShellRunner.quote(branch)) \(ShellRunner.quote(worktreePath)) 2>&1",
+
+        // Recuperación tras reinicio: worktree ya registrado y presente → se reutiliza.
+        let registered = await ShellRunner.run("git worktree list --porcelain", cwd: root)
+        if registered.stdout.contains("worktree \(worktreeURL.path)"),
+           FileManager.default.fileExists(atPath: worktreeURL.path) {
+            return .success(worktreeURL)
+        }
+        // Registro huérfano (directorio borrado a mano) → limpiar el registro.
+        _ = await ShellRunner.run("git worktree prune", cwd: root)
+
+        // Directorio residual sin registro: se aparta (nunca se borra — podría
+        // contener trabajo de una sesión interrumpida).
+        if FileManager.default.fileExists(atPath: worktreeURL.path) {
+            let stamp = Int(Date.now.timeIntervalSince1970)
+            let recovered = root.appendingPathComponent(".workspace/worktrees/\(changeID)-recuperado-\(stamp)")
+            do {
+                try FileManager.default.moveItem(at: worktreeURL, to: recovered)
+            } catch {
+                return .failure(String(localized: "Hay un directorio residual en \(worktreePath) que no se pudo apartar: \(error.localizedDescription)"))
+            }
+        }
+
+        // La rama residual se REUTILIZA (conserva sus commits); solo se crea si no existe.
+        let branchExists = await ShellRunner.run(
+            "git rev-parse --verify -q refs/heads/\(ShellRunner.quote(branch)) >/dev/null 2>&1 && echo yes",
             cwd: root
-        )
-        guard result.ok else { return nil }
-        return root.appendingPathComponent(worktreePath)
+        ).trimmedOutput == "yes"
+
+        let addCommand = branchExists
+            ? "git worktree add \(ShellRunner.quote(worktreePath)) \(ShellRunner.quote(branch)) 2>&1"
+            : "git worktree add -b \(ShellRunner.quote(branch)) \(ShellRunner.quote(worktreePath)) 2>&1"
+        let result = await ShellRunner.run(addCommand, cwd: root)
+        guard result.ok else {
+            let detail = result.trimmedOutput.isEmpty ? result.stderr : result.trimmedOutput
+            return .failure(String(localized: "git worktree add falló: \(detail)"))
+        }
+        return .success(worktreeURL)
     }
 
     /// Cierra el change: commit en el worktree, merge a la rama original y limpieza.

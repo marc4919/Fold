@@ -106,6 +106,14 @@ final class ChangeSession {
     @ObservationIgnored private var streamTask: Task<Void, Never>?
     @ObservationIgnored private var chatTask: Task<Void, Never>?
     @ObservationIgnored private var planTask: Task<Void, Never>?
+    // Asas de los procesos de agente en curso: cancelación estructurada con espera.
+    @ObservationIgnored private var workHandle: AgentRunHandle?
+    @ObservationIgnored private var chatHandle: AgentRunHandle?
+    @ObservationIgnored private var planHandle: AgentRunHandle?
+    /// Resultado de la última sesión de trabajo: nil = en curso o sin sesión.
+    private(set) var lastRunSucceeded: Bool?
+    /// Error visible de la sesión de trabajo (fallo, timeout, cancelación).
+    private(set) var workError: String?
     @ObservationIgnored private var seedStarted = false
 
     init(
@@ -212,6 +220,9 @@ final class ChangeSession {
     /// Cambiar el agente de la sesión resetea la continuidad (cada CLI tiene la suya).
     func setAgent(binaryPath: String?) {
         guard binaryPath != agentBinary else { return }
+        // Cambiar de agente cancela lo que el anterior tuviera en marcha:
+        // dos CLIs distintas nunca comparten sesión ni escriben a la vez.
+        Task { await shutdown() }
         agentBinary = binaryPath
         agentSessionID = nil
     }
@@ -392,10 +403,12 @@ final class ChangeSession {
             chatMessages.append(liveMessage)
         }
 
+        let handle = AgentRunHandle()
+        chatHandle = handle
         chatTask = Task {
             var reply = ""
             for await event in AgentRunner.stream(
-                prompt: prompt, binary: binary, cwd: cwd, mode: .explore, resumeID: resume, timeout: 300
+                prompt: prompt, binary: binary, cwd: cwd, mode: .explore, resumeID: resume, timeout: 300, handle: handle
             ) {
                 if Task.isCancelled { break }
                 switch event {
@@ -456,11 +469,14 @@ final class ChangeSession {
         }
     }
 
-    /// Detiene la pregunta en curso del chat.
+    /// Detiene la pregunta en curso del chat (proceso incluido).
     func cancelChat() {
         chatTask?.cancel()
         chatTask = nil
         isAgentThinking = false
+        let handle = chatHandle
+        chatHandle = nil
+        Task.detached { await handle?.stopAndWait() }
     }
 
     private func updateChatMessage(id: UUID, text: String, streaming: Bool, artifactLink: String? = nil) {
@@ -702,17 +718,22 @@ final class ChangeSession {
         }
     }
 
-    /// Cancela la generación/ajuste del plan en curso.
+    /// Cancela la generación/ajuste del plan en curso (proceso incluido).
     func cancelPlanGeneration() {
         planTask?.cancel()
         planTask = nil
         isGeneratingPlan = false
         planProgressText = nil
+        let handle = planHandle
+        planHandle = nil
+        Task.detached { await handle?.stopAndWait() }
     }
 
     private func runPlanGeneration(prompt: String, binary: String, resumeID: String?) async {
+        let handle = AgentRunHandle()
+        planHandle = handle
         for await event in AgentRunner.stream(
-            prompt: prompt, binary: binary, cwd: projectURL, mode: .work, resumeID: resumeID, timeout: 600
+            prompt: prompt, binary: binary, cwd: projectURL, mode: .work, resumeID: resumeID, timeout: 600, handle: handle
         ) {
             if Task.isCancelled { break }
             switch event {
@@ -812,6 +833,44 @@ final class ChangeSession {
     func stopWork() {
         streamTask?.cancel()
         streamTask = nil
+        // El proceso muere de verdad (grupo incluido); sin esperar aquí.
+        let handle = workHandle
+        Task.detached { await handle?.stopAndWait() }
+    }
+
+    /// Detiene la sesión de trabajo y ESPERA a que el proceso del agente muera.
+    func stopWorkAndWait() async {
+        streamTask?.cancel()
+        streamTask = nil
+        await workHandle?.stopAndWait()
+        workHandle = nil
+    }
+
+    /// "Terminar sesión y revisar": primero detiene y espera al agente,
+    /// después prepara el diff — nunca se revisa con el proceso aún escribiendo.
+    func finishAndReview() async {
+        await stopWorkAndWait()
+        sessionEnd = sessionEnd ?? .now
+        advance(to: .review)
+    }
+
+    /// Apaga TODO lo que esta sesión tenga en marcha y espera a que muera:
+    /// se llama al cerrar el proyecto, cambiar de change o cambiar de agente.
+    func shutdown() async {
+        streamTask?.cancel()
+        streamTask = nil
+        chatTask?.cancel()
+        chatTask = nil
+        planTask?.cancel()
+        planTask = nil
+        isAgentThinking = false
+        isGeneratingPlan = false
+        await workHandle?.stopAndWait()
+        await chatHandle?.stopAndWait()
+        await planHandle?.stopAndWait()
+        workHandle = nil
+        chatHandle = nil
+        planHandle = nil
     }
 
     /// Pausa real: termina el proceso del agente y espera tu indicación.
@@ -854,28 +913,48 @@ final class ChangeSession {
         receivedRealUsage = false
         sessionStart = .now
         sessionEnd = nil
+        lastRunSucceeded = nil
+        workError = nil
+
+        let handle = AgentRunHandle()
+        workHandle = handle
 
         streamTask = Task { [weak self] in
             guard let self, let root = self.projectURL else { return }
 
-            // Aislamiento real: worktree dedicado si el repo lo permite.
+            // Aislamiento real: worktree dedicado. Si no puede crearse, la
+            // ejecución se BLOQUEA con el error real — nunca se cae en silencio
+            // al árbol principal.
             var cwd = root
             if self.isolationMode == "worktree" {
                 if let existing = self.workingDirURL, existing != root,
                    FileManager.default.fileExists(atPath: existing.path) {
                     cwd = existing
-                } else if let worktree = await GitService.setupWorktree(root: root, changeID: self.change.id) {
-                    cwd = worktree
-                    self.terminalLines.append("⏺ worktree aislado · .workspace/worktrees/\(self.change.id)")
                 } else {
-                    self.terminalLines.append(String(localized: "⏺ sin worktree (repo sin commits) · trabajando en el árbol principal"))
+                    let setup = await GitService.setupWorktree(root: root, changeID: self.change.id)
+                    switch setup {
+                    case .success(let worktree):
+                        cwd = worktree
+                        self.terminalLines.append("⏺ worktree aislado · .workspace/worktrees/\(self.change.id)")
+                    case .failure(let reason):
+                        self.workError = reason
+                        self.terminalLines.append(String(localized: "⏺ no se pudo crear el aislamiento — sesión bloqueada"))
+                        self.terminalLines.append("⏺ \(reason)")
+                        self.toasts?.show(String(localized: "Aislamiento no disponible: \(reason)"))
+                        self.logEvent(stage: "work", actor: .system,
+                                      text: String(localized: "Aislamiento no disponible — sesión bloqueada"),
+                                      detail: reason)
+                        self.streamTask = nil
+                        self.workHandle = nil
+                        return
+                    }
                 }
             }
             self.workingDirURL = cwd
             self.logEvent(
                 stage: "work", actor: .system,
                 text: String(localized: "Sesión iniciada · run #\(self.runNumber)"),
-                detail: cwd == root ? String(localized: "árbol principal") : String(localized: "worktree aislado")
+                detail: cwd == root ? String(localized: "árbol principal (modo directo)") : String(localized: "worktree aislado")
             )
 
             let prompt = self.workPrompt()
@@ -892,22 +971,35 @@ final class ChangeSession {
             defer { poller.cancel() }
 
             for await event in AgentRunner.stream(
-                prompt: prompt, binary: binary, cwd: cwd, mode: .work, resumeID: self.agentSessionID, timeout: 900
+                prompt: prompt, binary: binary, cwd: cwd, mode: .work,
+                resumeID: self.agentSessionID, timeout: 900, handle: handle
             ) {
                 guard !Task.isCancelled else { return }
                 self.apply(event)
             }
             guard !Task.isCancelled else { return }
             self.streamTask = nil
+            self.workHandle = nil
             self.reloadFromDisk()
             let files = self.streamEvents.filter { $0.fileRow != nil }.count
-            self.logEvent(
-                stage: "work", actor: .system,
-                text: String(localized: "Sesión terminada"),
-                detail: String(localized: "\(self.streamEvents.count) eventos · \(files) archivos")
-            )
-            if self.state == .implementing {
-                self.advance(to: .review)
+
+            // Un fallo, timeout o cancelación NO avanza a Revisión: se queda
+            // en Trabajo con el error visible y recuperable.
+            if self.lastRunSucceeded == true {
+                self.logEvent(
+                    stage: "work", actor: .system,
+                    text: String(localized: "Sesión terminada"),
+                    detail: String(localized: "\(self.streamEvents.count) eventos · \(files) archivos")
+                )
+                if self.state == .implementing {
+                    self.advance(to: .review)
+                }
+            } else {
+                self.logEvent(
+                    stage: "work", actor: .system,
+                    text: String(localized: "Sesión terminada con errores — sin avanzar a Revisión"),
+                    detail: self.workError
+                )
             }
         }
     }
@@ -999,6 +1091,10 @@ final class ChangeSession {
                     streamEvents.append(StreamEvent(kind: .message, text: result, timeLabel: time))
                 }
                 sessionEnd = .now
+                lastRunSucceeded = success
+                if !success {
+                    workError = result ?? String(localized: "La sesión del agente terminó con errores.")
+                }
                 terminalLines.append(success ? "⏺ sesión terminada ✓" : "⏺ sesión terminada con errores")
                 notifySessionFinished(success: success)
             }

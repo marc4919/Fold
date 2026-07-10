@@ -197,8 +197,10 @@ struct WorkStreamView: View {
                     .tint(.foldReview)
 
                     Button(role: .destructive) {
-                        session.stopWork()
-                        appState.toasts.show(String(localized: "Sesión detenida"))
+                        Task {
+                            await session.stopWorkAndWait()
+                            appState.toasts.show(String(localized: "Sesión detenida"))
+                        }
                     } label: {
                         Label("Detener", systemImage: "stop.fill")
                             .frame(maxWidth: .infinity)
@@ -209,7 +211,12 @@ struct WorkStreamView: View {
             }
 
             Button {
-                session.advance(to: .review)
+                if session.isReal {
+                    // Detiene y ESPERA al agente antes de preparar el diff.
+                    Task { await session.finishAndReview() }
+                } else {
+                    session.advance(to: .review)
+                }
             } label: {
                 HStack {
                     Text(session.isReal ? String(localized: "Terminar sesión y revisar") : String(localized: "simular: sesión termina"))

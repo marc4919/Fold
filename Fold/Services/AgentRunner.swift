@@ -22,6 +22,34 @@ nonisolated enum AgentMode: Sendable, Equatable {
     case work
 }
 
+/// Asa de una ejecución en curso: permite detener el proceso del agente
+/// (y sus descendientes) y ESPERAR a que muera, no solo dispararlo.
+nonisolated final class AgentRunHandle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: SupervisedProcess?
+
+    func attach(_ supervised: SupervisedProcess) {
+        lock.lock()
+        process = supervised
+        lock.unlock()
+    }
+
+    /// Cancelación estructurada: vuelve cuando el proceso ha terminado de verdad.
+    func stopAndWait() async {
+        lock.lock()
+        let supervised = process
+        lock.unlock()
+        await supervised?.cancel()
+    }
+
+    var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let process else { return false }
+        return !process.currentState.isTerminal
+    }
+}
+
 /// Lanza el binario del agente en modo headless con salida estructurada
 /// (nunca scrapea el TUI) y traduce su stream al contrato canónico.
 /// Hereda la autenticación de la sesión CLI existente del usuario.
@@ -44,7 +72,8 @@ enum AgentRunner {
         cwd: URL?,
         mode: AgentMode = .explore,
         resumeID: String? = nil,
-        timeout: TimeInterval = 600
+        timeout: TimeInterval = 600,
+        handle: AgentRunHandle? = nil
     ) -> AsyncStream<AgentEvent> {
         // Fail closed: sin capacidades conocidas no hay ejecución con permisos implícitos.
         guard let capabilities = AgentCapabilities.forBinary(binary) else {
@@ -67,6 +96,7 @@ enum AgentRunner {
             inactivityTimeout: timeout,
             hardTimeout: max(timeout * 4, 3600)
         ))
+        handle?.attach(process)
         let parser = invocation.parser
 
         return AsyncStream { continuation in
@@ -144,10 +174,11 @@ enum AgentRunner {
         cwd: URL?,
         mode: AgentMode = .explore,
         resumeID: String? = nil,
-        timeout: TimeInterval = 300
+        timeout: TimeInterval = 300,
+        handle: AgentRunHandle? = nil
     ) async -> String {
         var reply = ""
-        for await event in stream(prompt: prompt, binary: binary, cwd: cwd, mode: mode, resumeID: resumeID, timeout: timeout) {
+        for await event in stream(prompt: prompt, binary: binary, cwd: cwd, mode: mode, resumeID: resumeID, timeout: timeout, handle: handle) {
             switch event {
             case .message(let text):
                 reply += (reply.isEmpty ? "" : "\n") + text

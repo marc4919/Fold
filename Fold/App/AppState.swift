@@ -108,9 +108,13 @@ final class AppState {
     }
 
     /// Cierra el proyecto activo y vuelve al selector.
+    /// Todo lo que la sesión tuviera en marcha (chat, plan, trabajo) se
+    /// cancela y se espera a que muera: sin procesos huérfanos.
     func closeProject() {
         watcher = nil
-        session?.stopWork()
+        if let closing = session {
+            Task.detached { await closing.shutdown() }
+        }
         session = nil
         openedChangeID = nil
         projectURL = nil
@@ -265,6 +269,11 @@ final class AppState {
     /// Abre el dashboard de un change, creando su sesión.
     /// En proyecto real lee el change del disco; en demo usa el change de ejemplo.
     func openChange(id: String, initialState: ChangeState? = nil, seed: String? = nil) {
+        // La sesión anterior se apaga del todo antes de crear la nueva:
+        // sin procesos huérfanos ni respuestas intercaladas entre changes.
+        if let previous = session, openedChangeID != id {
+            Task.detached { await previous.shutdown() }
+        }
         if isRealProject, let info = openSpecState?.changes.first(where: { $0.id == id }) {
             let agentName = defaultAgentBinary.map { ($0 as NSString).lastPathComponent } ?? "agente"
             let change = OpenSpecService.makeChange(from: info, agentLabel: agentName)

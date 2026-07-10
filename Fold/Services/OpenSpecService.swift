@@ -186,7 +186,11 @@ enum OpenSpecService {
     }
 
     nonisolated static func saveFile(named name: String, content: String, in change: OpenSpecChangeInfo) throws {
-        try content.write(to: change.dirURL.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        guard let safe = PathGuard.safeFilename(name) else {
+            throw PathGuard.ContainmentError(path: name, root: change.dirURL.path)
+        }
+        let target = try PathGuard.verify(change.dirURL.appendingPathComponent(safe), within: change.dirURL)
+        try content.write(to: target, atomically: true, encoding: .utf8)
     }
 
     /// Marca/desmarca una task en tasks.md (write-back del checkbox).

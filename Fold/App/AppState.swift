@@ -320,7 +320,11 @@ final class AppState {
             await session.discardCleanup()
             if let info {
                 do {
-                    try FileManager.default.removeItem(at: info.dirURL)
+                    // Borrado destructivo: solo dentro de openspec/changes/ del proyecto.
+                    guard let root = self.projectURL else { throw CocoaError(.fileNoSuchFile) }
+                    let changes = root.appendingPathComponent("openspec/changes")
+                    let target = try PathGuard.verify(info.dirURL, within: changes)
+                    try FileManager.default.removeItem(at: target)
                 } catch {
                     self.toasts.show(String(localized: "No se pudo borrar el change: \(error.localizedDescription)"))
                 }

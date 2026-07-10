@@ -56,13 +56,17 @@ enum MemoryService {
 
         var attached = 0
         for file in fileURLs {
+            // El nombre viene del panel de archivos, pero se valida igualmente.
+            guard let name = PathGuard.safeFilename(file.lastPathComponent) else { continue }
             if file.pathExtension.lowercased() == "md" {
-                let destination = uniqueURL(memoryURL.appendingPathComponent(file.lastPathComponent))
+                let destination = uniqueURL(try PathGuard.verify(
+                    memoryURL.appendingPathComponent(name), within: memoryURL))
                 try FileManager.default.copyItem(at: file, to: destination)
             } else {
                 let attachmentsURL = memoryURL.appendingPathComponent("attachments")
                 try FileManager.default.createDirectory(at: attachmentsURL, withIntermediateDirectories: true)
-                let destination = uniqueURL(attachmentsURL.appendingPathComponent(file.lastPathComponent))
+                let destination = uniqueURL(try PathGuard.verify(
+                    attachmentsURL.appendingPathComponent(name), within: attachmentsURL))
                 try FileManager.default.copyItem(at: file, to: destination)
 
                 let stubName = file.deletingPathExtension().lastPathComponent
@@ -95,7 +99,8 @@ enum MemoryService {
 
     /// Renombra una entrada: el archivo pasa a <slug>.md y el heading se actualiza.
     nonisolated static func rename(entry: MemoryEntry, to newName: String, at root: URL) throws {
-        let fileURL = root.appendingPathComponent(entry.source)
+        let memoryURL = root.appendingPathComponent(".workspace/memory")
+        let fileURL = try PathGuard.verify(root.appendingPathComponent(entry.source), within: memoryURL)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw CocoaError(.fileNoSuchFile)
         }
@@ -127,24 +132,28 @@ enum MemoryService {
     }
 
     /// Elimina una entrada; si referencia un adjunto en attachments/, lo elimina también.
+    /// El nombre del adjunto sale del CONTENIDO del archivo (no confiable): se valida
+    /// como nombre simple y se verifica su contención antes de tocar nada.
     nonisolated static func delete(entry: MemoryEntry, at root: URL) throws {
-        let fileURL = root.appendingPathComponent(entry.source)
+        let memoryURL = root.appendingPathComponent(".workspace/memory")
+        let fileURL = try PathGuard.verify(root.appendingPathComponent(entry.source), within: memoryURL)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw CocoaError(.fileNoSuchFile)
         }
 
         // Adjunto referenciado como `attachments/<archivo>` en el cuerpo.
         if let content = try? String(contentsOf: fileURL, encoding: .utf8) {
+            let attachmentsURL = memoryURL.appendingPathComponent("attachments")
             for line in content.components(separatedBy: "\n") {
                 guard let range = line.range(of: "attachments/") else { continue }
                 let tail = line[range.lowerBound...]
-                let name = tail.dropFirst("attachments/".count)
-                    .prefix(while: { $0 != "`" && $0 != " " && $0 != ")" })
-                if !name.isEmpty {
-                    let attachment = fileURL.deletingLastPathComponent()
-                        .appendingPathComponent("attachments/\(name)")
-                    try? FileManager.default.removeItem(at: attachment)
-                }
+                let raw = String(tail.dropFirst("attachments/".count)
+                    .prefix(while: { $0 != "`" && $0 != " " && $0 != ")" }))
+                guard let name = PathGuard.safeFilename(raw),
+                      let attachment = try? PathGuard.verify(
+                          attachmentsURL.appendingPathComponent(name), within: attachmentsURL
+                      ) else { continue }
+                try? FileManager.default.removeItem(at: attachment)
             }
         }
         try FileManager.default.removeItem(at: fileURL)

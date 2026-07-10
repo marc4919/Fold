@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    # Fold requiere macOS 26 / Xcode 26 — ajustar la imagen cuando GitHub la publique.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Seleccionar Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build Debug + Release, tests y árbol limpio
+        run: ./scripts/ci.sh

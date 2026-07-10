@@ -1,19 +1,10 @@
 import SwiftUI
 import Observation
-import UserNotifications
 
-
-/// Evento persistido del timeline del change (history.json en el change dir).
-nonisolated struct StoredHistoryEvent: Codable, Sendable {
-    var stage: String      // explore | idea | plan | work | review
-    var actor: String      // human | agent | system
-    var date: Date
-    var text: String
-    var detail: String?
-}
-
-/// Estado vivo del change activo: state machine, tabs progresivas,
-/// y la sesión del agente (real en proyectos abiertos, simulada en la demo).
+/// Estado vivo del change activo: coordina la state machine, las tabs
+/// progresivas y la sesión del agente (real en proyectos abiertos, simulada
+/// en la demo) apoyándose en los servicios: ProcessSupervisor/AgentRunner,
+/// GitChangeTransaction, OpenSpecService, HistoryStore y NotificationService.
 @MainActor
 @Observable
 final class ChangeSession {
@@ -247,15 +238,11 @@ final class ChangeSession {
 
     // MARK: - Historia persistida
 
-    private var historyURL: URL? {
-        realInfo?.dirURL.appendingPathComponent("history.json")
-    }
+    @ObservationIgnored private lazy var historyStore = HistoryStore(changeDirURL: realInfo?.dirURL)
 
     private func loadHistory() {
-        guard let historyURL,
-              let data = try? Data(contentsOf: historyURL),
-              let events = try? JSONDecoder().decode([StoredHistoryEvent].self, from: data) else { return }
-        historyLog = events
+        let events = historyStore.load()
+        if !events.isEmpty { historyLog = events }
     }
 
     func logEvent(stage: String, actor: HistoryEvent.Actor, text: String, detail: String? = nil) {
@@ -268,9 +255,8 @@ final class ChangeSession {
         historyLog.append(StoredHistoryEvent(
             stage: stage, actor: actorKey, date: .now, text: text, detail: detail
         ))
-        if let historyURL, let data = try? JSONEncoder().encode(historyLog) {
-            try? data.write(to: historyURL)
-        }
+        // La escritura va en background: el stream no bloquea el MainActor.
+        historyStore.persist(historyLog)
     }
 
     /// Timeline real agrupado por etapas, para el drawer de Historia.
@@ -313,7 +299,11 @@ final class ChangeSession {
     // MARK: - Transiciones
 
     func advance(to newState: ChangeState) {
-        guard newState != state else { return }
+        // La state machine decide: transiciones imposibles se rechazan.
+        let allowed = isReal
+            ? ChangeStateMachine.canTransition(from: state, to: newState)
+            : ChangeStateMachine.canTransitionInDemo(from: state, to: newState)
+        guard allowed else { return }
         withAnimation(.smooth(duration: 0.35)) {
             state = newState
             change.state = newState
@@ -1167,27 +1157,18 @@ final class ChangeSession {
     }
 
     private func notifySessionFinished(success: Bool) {
-        let content = UNMutableNotificationContent()
-        content.title = change.title
-        content.body = success
-            ? String(localized: "Sesión del agente terminada · lista para revisar")
-            : String(localized: "La sesión del agente terminó con errores")
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString, content: content, trigger: nil
+        NotificationService.notify(
+            title: change.title,
+            body: success
+                ? String(localized: "Sesión del agente terminada · lista para revisar")
+                : String(localized: "La sesión del agente terminó con errores")
         )
-        UNUserNotificationCenter.current().add(request)
     }
 
     /// El permiso de notificaciones se pide en contexto: la primera vez que se
     /// lanza una sesión de trabajo larga (es cuando la notificación aporta algo).
     func requestNotificationPermissionIfNeeded() {
-        Task {
-            let settings = await UNUserNotificationCenter.current().notificationSettings()
-            if settings.authorizationStatus == .notDetermined {
-                _ = try? await UNUserNotificationCenter.current()
-                    .requestAuthorization(options: [.alert, .sound])
-            }
-        }
+        NotificationService.requestPermissionIfNeeded()
     }
 
     // MARK: - Revisión real

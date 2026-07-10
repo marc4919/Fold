@@ -5,6 +5,10 @@ struct ReviewFile: Identifiable {
     enum Kind: String {
         case new = "NEW"
         case mod = "MOD"
+        case del = "DEL"
+        case ren = "REN"
+        case bin = "BIN"
+        case conflict = "CONF"
     }
 
     let id = UUID()
@@ -12,6 +16,8 @@ struct ReviewFile: Identifiable {
     let path: String
     let added: Int
     let removed: Int
+    /// Ruta original si el archivo fue renombrado.
+    var originalPath: String?
 }
 
 /// Lane colapsable de la tab Revisión (Specs / Código / Artefactos).

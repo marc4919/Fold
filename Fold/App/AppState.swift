@@ -346,29 +346,51 @@ final class AppState {
         }
     }
 
-    /// Archiva el change de la sesión activa (mueve el directorio al archive)
-    /// y alimenta la memoria del proyecto: el archivo deja una decisión escrita.
-    func archiveActiveChange() {
-        guard isRealProject, let url = projectURL, let session, let info = session.realInfo else { return }
+    /// Archiva el change (mueve el directorio al archive), alimenta la memoria
+    /// y deja todo VERSIONADO vía la transacción. Devuelve si el cierre completo
+    /// fue bien: el estado "Archivado" solo debe mostrarse con true.
+    func archiveActiveChange() async -> (ok: Bool, detail: String?) {
+        guard isRealProject, let url = projectURL, let session, let info = session.realInfo else {
+            return (false, String(localized: "No hay change activo que archivar"))
+        }
         do {
             try OpenSpecService.archive(info)
-
-            let summary = OpenSpecService.proposalSummary(
-                from: session.fileContents[.proposal]?.content ?? info.proposal
-            )
-            let body = summary.isEmpty
-                ? String(localized: "Change «\(session.change.title)» mergeado y archivado.")
-                : summary
-            try? MemoryService.add(
-                title: session.change.title,
-                body: body + "\n\n" + String(localized: "Archivado en openspec/changes/archive/ — el registro completo (exploración, plan, historia) vive allí."),
-                kind: .decision,
-                at: url
-            )
-            refreshRealProject()
         } catch {
             toasts.show(String(localized: "No se pudo archivar: \(error.localizedDescription)"))
+            return (false, error.localizedDescription)
         }
+
+        let summary = OpenSpecService.proposalSummary(
+            from: session.fileContents[.proposal]?.content ?? info.proposal
+        )
+        let body = summary.isEmpty
+            ? String(localized: "Change «\(session.change.title)» mergeado y archivado.")
+            : summary
+        try? MemoryService.add(
+            title: session.change.title,
+            body: body + "\n\n" + String(localized: "Archivado en openspec/changes/archive/ — el registro completo (exploración, plan, historia) vive allí."),
+            kind: .decision,
+            at: url
+        )
+
+        // Cierre coherente: archive + memoria quedan en su commit y solo
+        // entonces se limpian worktree, rama y registro de la transacción.
+        var finalizeDetail: String?
+        if let record = GitChangeTransaction.load(root: url, changeID: info.id) {
+            let result = await GitChangeTransaction.finalizeArchive(root: url, record: record)
+            if !result.ok {
+                toasts.show(String(localized: "El archivo no quedó versionado: \(result.detail)"))
+                refreshRealProject()
+                return (false, result.detail)
+            }
+            finalizeDetail = result.detail.isEmpty ? nil : result.detail
+        }
+
+        refreshRealProject()
+        if let finalizeDetail {
+            toasts.show(finalizeDetail)
+        }
+        return (true, finalizeDetail)
     }
 
     func toggleInspector(_ content: InspectorContent) {

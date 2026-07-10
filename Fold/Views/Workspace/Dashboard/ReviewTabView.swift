@@ -188,11 +188,17 @@ struct ReviewTabView: View {
             .first(where: { $0.kind == .commit })?.content ?? "feat: \(session.change.title)"
         Task {
             let result = await session.mergeChange(commitMessage: commitMessage)
-            if result.ok {
-                appState.archiveActiveChange()
+            guard result.ok else {
+                appState.toasts.show(String(localized: "El merge falló: \(result.detail ?? "conflictos") — nada se ha perdido, el worktree se conserva"))
+                return
+            }
+            // "Archivado" solo aparece cuando TODO el cierre (archive + memoria
+            // + commit) ha ido bien; si falla, el estado no miente.
+            let archived = await appState.archiveActiveChange()
+            if archived.ok {
                 session.advance(to: .archived)
             } else {
-                appState.toasts.show(String(localized: "El merge falló: \(result.detail ?? "conflictos") — resuélvelo en tu terminal"))
+                appState.toasts.show(String(localized: "El merge está hecho, pero el archivo falló: \(archived.detail ?? "") — reintenta desde Revisión"))
             }
         }
     }

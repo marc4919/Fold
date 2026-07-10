@@ -936,6 +936,13 @@ final class ChangeSession {
                     case .success(let worktree):
                         cwd = worktree
                         self.terminalLines.append("⏺ worktree aislado · .workspace/worktrees/\(self.change.id)")
+                        // La transacción registra base, rama y worktree ANTES de trabajar.
+                        _ = await GitChangeTransaction.begin(
+                            root: root,
+                            changeID: self.change.id,
+                            worktreePath: ".workspace/worktrees/\(self.change.id)",
+                            workBranch: "fold/\(self.change.id)"
+                        )
                     case .failure(let reason):
                         self.workError = reason
                         self.terminalLines.append(String(localized: "⏺ no se pudo crear el aislamiento — sesión bloqueada"))
@@ -949,6 +956,13 @@ final class ChangeSession {
                         return
                     }
                 }
+            }
+            if cwd == root {
+                // Modo directo (elección explícita): la transacción captura lo
+                // que el usuario tuviera staged para no commitearlo jamás.
+                _ = await GitChangeTransaction.begin(
+                    root: root, changeID: self.change.id, worktreePath: nil, workBranch: nil
+                )
             }
             self.workingDirURL = cwd
             self.logEvent(
@@ -1142,7 +1156,7 @@ final class ChangeSession {
 
         let dir = workingDirURL ?? projectURL
         if let dir {
-            let allFiles = await GitService.pendingChanges(at: dir)
+            let allFiles = await GitChangeTransaction.reviewFiles(at: dir)
             // Solo lo que pertenece a ESTE change: fuera los artefactos de otros
             // changes y el ruido del workspace (worktrees, historia…).
             let files = allFiles.filter { file in
@@ -1153,6 +1167,17 @@ final class ChangeSession {
                     return file.path.hasPrefix(".workspace/memory/")
                 }
                 return true
+            }
+
+            // El manifiesto de la revisión ES el manifiesto del commit: se
+            // persiste en la transacción y el cierre solo commitea esto.
+            if let root = projectURL, var record = GitChangeTransaction.load(root: root, changeID: change.id) {
+                record.approvedPaths = files.flatMap { file -> [String] in
+                    // Renombrados: el commit necesita la ruta vieja (borrado) y la nueva.
+                    if let original = file.originalPath { return [original, file.path] }
+                    return [file.path]
+                }
+                GitChangeTransaction.save(record, root: root)
             }
             let specs = files.filter { $0.path.hasPrefix("openspec/") || $0.path.hasPrefix(".workspace/") }
             let code = files.filter { !$0.path.hasPrefix("openspec/") && !$0.path.hasPrefix(".workspace/") }
@@ -1276,34 +1301,29 @@ final class ChangeSession {
 
     // MARK: - Merge real
 
-    /// Commit + merge del worktree (o commit directo) antes de archivar.
+    /// Commit del manifiesto aprobado + merge, vía GitChangeTransaction.
+    /// El mensaje editado por el usuario se usa ÍNTEGRO (no solo la primera línea).
     func mergeChange(commitMessage: String) async -> (ok: Bool, detail: String?) {
         guard isReal, let root = projectURL else { return (true, nil) }
         isMerging = true
         defer { isMerging = false }
 
-        let message = commitMessage.components(separatedBy: "\n").first.flatMap {
-            $0.isEmpty ? nil : $0
-        } ?? "feat: \(change.title)"
+        let trimmed = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = trimmed.isEmpty ? "feat: \(change.title)" : trimmed
 
         var ok = true
         var detail: String?
-        if let worktree = workingDirURL, worktree != root {
-            let result = await GitService.mergeWorktree(
-                root: root, changeID: change.id, worktree: worktree, message: message
+        if let record = GitChangeTransaction.load(root: root, changeID: change.id) {
+            let result = await GitChangeTransaction.commitAndMerge(
+                root: root, record: record, message: message
             )
             ok = result.ok
-            detail = result.detail
+            detail = result.detail.isEmpty ? nil : result.detail
             if ok { workingDirURL = nil }
         } else if await GitService.hasHead(at: root) {
-            let committed = await GitService.commitAll(at: root, message: message)
-            if !committed {
-                let pending = await ShellRunner.run("git status --porcelain 2>/dev/null", cwd: root)
-                if !pending.trimmedOutput.isEmpty {
-                    ok = false
-                    detail = String(localized: "el commit directo falló con cambios pendientes")
-                }
-            }
+            // Sin transacción (no hubo sesión de trabajo): no hay nada que
+            // mergear; el cierre solo archivará artefactos.
+            ok = true
         }
 
         if ok {
@@ -1360,13 +1380,12 @@ final class ChangeSession {
         return (ok, detail)
     }
 
-    /// Limpieza al descartar el change: proceso, worktree y rama.
+    /// Limpieza al descartar el change: procesos, worktree, rama y transacción.
     func discardCleanup() async {
-        stopWork()
-        cancelChat()
-        cancelPlanGeneration()
+        await shutdown()
         guard let root = projectURL, isReal else { return }
         await GitService.discardWorktree(root: root, changeID: change.id)
+        GitChangeTransaction.remove(root: root, changeID: change.id)
     }
 
     static func loginHint(for cliName: String) -> String {

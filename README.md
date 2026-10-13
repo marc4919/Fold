@@ -6,9 +6,7 @@
 
 <p align="center">
   <img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-000?logo=apple&logoColor=white">
-  <img alt="Swift" src="https://img.shields.io/badge/Swift-SwiftUI-F05138?logo=swift&logoColor=white">
   <a href="https://github.com/marc4919/Fold/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/marc4919/Fold/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="Beta" src="https://img.shields.io/badge/estado-beta%200.1.0-orange">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/licencia-MIT-blue"></a>
 </p>
 
@@ -18,18 +16,13 @@
 </p>
 -->
 
----
+Los agentes escriben código rápido; lo caro es decidir **qué** construir y
+revisar **qué** han producido. Fold es una app nativa de macOS que pone el foco
+ahí: explora, propone, diseña y desglosa tareas **antes** de que un agente
+implemente nada, y al final solo entra en git lo que tú has revisado.
 
-## El problema
-
-Los agentes escriben código rápido. Lo caro es decidir **qué** construir y
-revisar **qué** han producido.
-
-Fold es una app nativa de macOS que pone el foco ahí: explora, propone, diseña
-y desglosa tareas **antes** de que un agente implemente nada, y al final solo
-entra en git lo que tú has revisado. Funciona con **Claude Code, Codex,
-OpenCode y Cursor CLI** usando tus propias sesiones: Fold no gestiona claves ni
-cuentas, y no tiene servidor.
+Funciona con **Claude Code, Codex, OpenCode y Cursor CLI** usando tus propias
+sesiones. Sin claves, sin servidor y sin telemetría. Beta 0.1.0.
 
 ## Funcionalidades
 
@@ -54,28 +47,10 @@ cuentas, y no tiene servidor.
 
 ## De la idea al merge
 
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif", "fontSize": "15px", "lineColor": "#8b949e"}}}%%
-flowchart LR
-    E(["🔍 Explorar"]) --> I(["💡 Idea"]) --> P(["📐 Plan"]) --> T(["⚙️ Trabajo"]) --> R(["🔎 Revisión"]) --> C(["✅ Cierre"])
-    R -. iterar .-> T
-
-    classDef think fill:#E8F1FF,stroke:#3B82F6,stroke-width:2px,color:#1E3A8A
-    classDef build fill:#FFF4E5,stroke:#F59E0B,stroke-width:2px,color:#7C2D12
-    classDef ship fill:#E9F9EE,stroke:#22C55E,stroke-width:2px,color:#14532D
-    class E,I,P think
-    class T,R build
-    class C ship
-```
-
-| Fase | Qué pasa |
-|---|---|
-| **Explorar** | Chat en solo lectura; el contexto se acumula en `exploration.md` |
-| **Idea** | El agente sintetiza la intención y tú la ajustas |
-| **Plan** | `proposal.md`, `design.md` y `tasks.md`, en vivo y editables |
-| **Trabajo** | Implementación en un git worktree con rama propia |
-| **Revisión** | Diff exacto y mensaje de commit editable |
-| **Cierre** | Merge, archivo y memoria del proyecto |
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/flow-dark.svg">
+  <img src="docs/media/flow-light.svg" width="100%" alt="Explorar, Idea, Plan, Trabajo, Revisión y Cierre, con un bucle de iteración entre Revisión y Trabajo">
+</picture>
 
 <!-- TODO capturas: Plan · Revisión · Memoria (claro y oscuro)
 <p align="center">

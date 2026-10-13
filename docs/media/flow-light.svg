@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="914" height="126" viewBox="0 0 914 126" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9CA3AF"/></marker></defs>
+<rect x="10" y="46" width="134" height="72" rx="16" fill="#EEF4FF" stroke="#3B82F6" stroke-width="1.6"/>
+<circle cx="30" cy="66" r="9" fill="#3B82F6"/><text x="30" y="70" text-anchor="middle" font-size="11" font-weight="700" fill="#EEF4FF">1</text>
+<text x="77.0" y="86" text-anchor="middle" font-size="16" font-weight="650" fill="#1E3A8A">Explorar</text>
+<text x="77.0" y="105" text-anchor="middle" font-size="12" fill="#4B6BA8">solo lectura</text>
+<line x1="147" y1="82.0" x2="159" y2="82.0" stroke="#9CA3AF" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="162" y="46" width="134" height="72" rx="16" fill="#EEF4FF" stroke="#3B82F6" stroke-width="1.6"/>
+<circle cx="182" cy="66" r="9" fill="#3B82F6"/><text x="182" y="70" text-anchor="middle" font-size="11" font-weight="700" fill="#EEF4FF">2</text>
+<text x="229.0" y="86" text-anchor="middle" font-size="16" font-weight="650" fill="#1E3A8A">Idea</text>
+<text x="229.0" y="105" text-anchor="middle" font-size="12" fill="#4B6BA8">tú decides</text>
+<line x1="299" y1="82.0" x2="311" y2="82.0" stroke="#9CA3AF" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="314" y="46" width="134" height="72" rx="16" fill="#EEF4FF" stroke="#3B82F6" stroke-width="1.6"/>
+<circle cx="334" cy="66" r="9" fill="#3B82F6"/><text x="334" y="70" text-anchor="middle" font-size="11" font-weight="700" fill="#EEF4FF">3</text>
+<text x="381.0" y="86" text-anchor="middle" font-size="16" font-weight="650" fill="#1E3A8A">Plan</text>
+<text x="381.0" y="105" text-anchor="middle" font-size="12" fill="#4B6BA8">specs y tareas</text>
+<line x1="451" y1="82.0" x2="463" y2="82.0" stroke="#9CA3AF" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="466" y="46" width="134" height="72" rx="16" fill="#FFF6E8" stroke="#F59E0B" stroke-width="1.6"/>
+<circle cx="486" cy="66" r="9" fill="#F59E0B"/><text x="486" y="70" text-anchor="middle" font-size="11" font-weight="700" fill="#FFF6E8">4</text>
+<text x="533.0" y="86" text-anchor="middle" font-size="16" font-weight="650" fill="#7C2D12">Trabajo</text>
+<text x="533.0" y="105" text-anchor="middle" font-size="12" fill="#9A5B13">git worktree</text>
+<line x1="603" y1="82.0" x2="615" y2="82.0" stroke="#9CA3AF" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="618" y="46" width="134" height="72" rx="16" fill="#FFF6E8" stroke="#F59E0B" stroke-width="1.6"/>
+<circle cx="638" cy="66" r="9" fill="#F59E0B"/><text x="638" y="70" text-anchor="middle" font-size="11" font-weight="700" fill="#FFF6E8">5</text>
+<text x="685.0" y="86" text-anchor="middle" font-size="16" font-weight="650" fill="#7C2D12">Revisión</text>
+<text x="685.0" y="105" text-anchor="middle" font-size="12" fill="#9A5B13">diff exacto</text>
+<line x1="755" y1="82.0" x2="767" y2="82.0" stroke="#9CA3AF" stroke-width="1.6" marker-end="url(#a)"/>
+<rect x="770" y="46" width="134" height="72" rx="16" fill="#ECFAF1" stroke="#22C55E" stroke-width="1.6"/>
+<circle cx="790" cy="66" r="9" fill="#22C55E"/><text x="790" y="70" text-anchor="middle" font-size="11" font-weight="700" fill="#ECFAF1">6</text>
+<text x="837.0" y="86" text-anchor="middle" font-size="16" font-weight="650" fill="#14532D">Cierre</text>
+<text x="837.0" y="105" text-anchor="middle" font-size="12" fill="#2F7A4B">merge y memoria</text>
+<path d="M685.0,45 V30 Q685.0,22 677.0,22 H541.0 Q533.0,22 533.0,30 V43" fill="none" stroke="#9CA3AF" stroke-width="1.6" stroke-dasharray="5 4" stroke-linejoin="round" marker-end="url(#a)"/>
+<text x="609.0" y="15" text-anchor="middle" font-size="12" font-style="italic" fill="#6B7280">iterar con feedback</text>
+</svg>

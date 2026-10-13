@@ -123,8 +123,8 @@ changes y memoria, pero no ejecutar agentes.
 
 ## Hoja de ruta
 
-- [ ] Usar el CLI de OpenSpec cuando esté instalado: `validate` antes de
-      aceptar el plan y `archive` real con sincronización de specs
+- [ ] Usar el CLI de OpenSpec cuando esté instalado para archivar y
+      sincronizar las specs maestras
 - [ ] [Agent Client Protocol](https://agentclientprotocol.com) en lugar de la
       ejecución headless actual
 - [ ] Explorar con Cursor CLI, una vez verificado su modo de solo lectura

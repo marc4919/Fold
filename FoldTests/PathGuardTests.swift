@@ -62,4 +62,10 @@ final class PathGuardTests: XCTestCase {
         XCTAssertEqual(PathGuard.safeFilename("informe.pdf"), "informe.pdf")
         XCTAssertEqual(PathGuard.safeFilename(" con espacios.md "), "con espacios.md")
     }
+
+    func testStrictContainmentRejectsRootItself() throws {
+        let root = base.appendingPathComponent("root")
+        XCTAssertNil(try? PathGuard.verifyStrictlyInside(root, within: root))
+        XCTAssertNotNil(try? PathGuard.verifyStrictlyInside(root.appendingPathComponent("hijo"), within: root))
+    }
 }

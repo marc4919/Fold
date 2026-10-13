@@ -25,6 +25,16 @@ enum PathGuard {
         return resolved
     }
 
+    /// Para operaciones destructivas: como `verify`, pero la propia raíz NO vale
+    /// (borrar "dentro de openspec/changes" nunca puede borrar openspec/changes).
+    nonisolated static func verifyStrictlyInside(_ url: URL, within root: URL) throws -> URL {
+        let resolved = try verify(url, within: root)
+        guard resolved.path != resolveDeep(root.standardizedFileURL).path else {
+            throw ContainmentError(path: url.path, root: root.path)
+        }
+        return resolved
+    }
+
     nonisolated static func isContained(_ url: URL, within root: URL) -> Bool {
         (try? verify(url, within: root)) != nil
     }

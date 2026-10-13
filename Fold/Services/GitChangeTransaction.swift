@@ -145,9 +145,28 @@ enum GitChangeTransaction {
         root.appendingPathComponent(".workspace/transactions/\(changeID).json")
     }
 
+    /// El registro vive en el repo y NO es de confianza (puede venir clonado):
+    /// solo se acepta si su rama y su worktree son exactamente los que Fold
+    /// crea para ese change. Así un JSON manipulado no puede dirigir
+    /// `git branch -D` ni `git worktree remove` a otra rama o ruta.
     nonisolated static func load(root: URL, changeID: String) -> ChangeTransactionRecord? {
-        guard let data = try? Data(contentsOf: recordURL(root: root, changeID: changeID)) else { return nil }
-        return try? JSONDecoder().decode(ChangeTransactionRecord.self, from: data)
+        guard let data = try? Data(contentsOf: recordURL(root: root, changeID: changeID)),
+              let record = try? JSONDecoder().decode(ChangeTransactionRecord.self, from: data),
+              isTrusted(record, root: root, changeID: changeID) else { return nil }
+        return record
+    }
+
+    nonisolated static func isTrusted(_ record: ChangeTransactionRecord, root: URL, changeID: String) -> Bool {
+        guard record.changeID == changeID, PathGuard.safeFilename(changeID) == changeID else { return false }
+        if let branch = record.workBranch, branch != "fold/\(changeID)" { return false }
+        if let path = record.worktreePath {
+            guard path == ".workspace/worktrees/\(changeID)",
+                  PathGuard.isContained(root.appendingPathComponent(path),
+                                        within: root.appendingPathComponent(".workspace/worktrees"))
+            else { return false }
+        }
+        // Rama y worktree van juntos o no van.
+        return (record.workBranch == nil) == (record.worktreePath == nil)
     }
 
     nonisolated static func save(_ record: ChangeTransactionRecord, root: URL) {
@@ -285,26 +304,46 @@ enum GitChangeTransaction {
 
     /// Tras archivar el change y actualizar la memoria: los deja versionados
     /// en un commit propio y SOLO entonces limpia worktree, rama y registro.
+    /// `paths` son las rutas exactas del cierre (relativas al root): el
+    /// directorio original del change, su destino en archive/ y la entrada de
+    /// memoria creada. Nada más entra — ni otros changes ni otras memorias.
     /// Devuelve además si el árbol quedó limpio.
     nonisolated static func finalizeArchive(
         root: URL,
-        record: ChangeTransactionRecord
+        record: ChangeTransactionRecord,
+        paths: [String]
     ) async -> (ok: Bool, detail: String) {
-        // El archivo movió openspec/changes/<id> → archive/ y la memoria cambió:
-        // staging explícito de exactamente esas rutas.
-        let archivePaths = "openspec/changes .workspace/memory"
-        _ = await ShellRunner.run("git add -- \(archivePaths) 2>&1", cwd: root)
-        let commit = await ShellRunner.run(
-            "git commit -q -m \(ShellRunner.quote("opsx: archive \(record.changeID)")) -- \(archivePaths) 2>&1",
-            cwd: root
-        )
-        if !commit.ok {
-            let pending = await status(at: root)
-            let archivePending = pending.contains {
-                $0.path.hasPrefix("openspec/changes/") || $0.path.hasPrefix(".workspace/memory/")
+        // Solo rutas dentro del root; una ruta que ni existe ni está en el
+        // índice haría fallar el pathspec entero, así que se descarta.
+        var specs: [String] = []
+        for path in paths {
+            guard PathGuard.isContained(root.appendingPathComponent(path), within: root),
+                  root.appendingPathComponent(path).standardizedFileURL != root.standardizedFileURL
+            else { continue }
+            let onDisk = FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path)
+            let inIndex = await ShellRunner.run("git ls-files -- \(ShellRunner.quote(path))", cwd: root)
+                .trimmedOutput.isEmpty == false
+            if onDisk || inIndex { specs.append(ShellRunner.quote(path)) }
+        }
+
+        if !specs.isEmpty {
+            let joined = specs.joined(separator: " ")
+            let add = await ShellRunner.run("git add -- \(joined) 2>&1", cwd: root)
+            guard add.ok else {
+                return (false, String(localized: "No se pudo preparar el archivo: \(add.trimmedOutput)"))
             }
-            if archivePending {
-                return (false, String(localized: "El commit del archivo falló: \(commit.stdout.isEmpty ? commit.stderr : commit.stdout)"))
+            let commit = await ShellRunner.run(
+                "git commit -q -m \(ShellRunner.quote("opsx: archive \(record.changeID)")) -- \(joined) 2>&1",
+                cwd: root
+            )
+            if !commit.ok {
+                let pending = await status(at: root)
+                let archivePending = pending.contains { entry in
+                    paths.contains { entry.path == $0 || entry.path.hasPrefix($0 + "/") }
+                }
+                if archivePending {
+                    return (false, String(localized: "El commit del archivo falló: \(commit.stdout.isEmpty ? commit.stderr : commit.stdout)"))
+                }
             }
         }
 
@@ -323,15 +362,5 @@ enum GitChangeTransaction {
         let final = await ShellRunner.run("git status --porcelain 2>/dev/null", cwd: root)
         let clean = final.trimmedOutput.isEmpty
         return (true, clean ? "" : String(localized: "Quedan cambios sin versionar ajenos al change: \(final.trimmedOutput.components(separatedBy: "\n").count) archivo(s)"))
-    }
-
-    /// Transacciones abiertas en el proyecto (recuperación tras reinicio).
-    nonisolated static func openTransactions(root: URL) -> [ChangeTransactionRecord] {
-        let dir = root.appendingPathComponent(".workspace/transactions")
-        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
-        return files.filter { $0.pathExtension == "json" }.compactMap { url in
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return try? JSONDecoder().decode(ChangeTransactionRecord.self, from: data)
-        }
     }
 }

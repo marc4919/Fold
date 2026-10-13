@@ -92,4 +92,16 @@ final class AgentParserTests: XCTestCase {
         XCTAssertFalse(success)
         XCTAssertEqual(result, "sin cuota")
     }
+
+    /// Explorar con OpenCode: el agente inyectado niega todo salvo lectura.
+    func testOpenCodeExploreConfigIsDenyAll() throws {
+        let data = try XCTUnwrap(AgentRunner.openCodeExploreConfig.data(using: .utf8))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let agent = try XCTUnwrap((json["agent"] as? [String: Any])?[AgentRunner.openCodeExploreAgent] as? [String: Any])
+        let permission = try XCTUnwrap(agent["permission"] as? [String: Any])
+        XCTAssertEqual(permission["*"] as? String, "deny")
+        for tool in ["bash", "edit", "write", "patch", "webfetch", "task"] {
+            XCTAssertNil(permission[tool], "\(tool) no debe reabrirse tras el deny-all")
+        }
+    }
 }

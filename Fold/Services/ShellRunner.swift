@@ -22,13 +22,25 @@ enum ShellRunner {
         return environment
     }
 
-    nonisolated static func run(_ command: String, cwd: URL? = nil) async -> ShellResult {
+    /// Entorno de los comandos propios de Fold (git, wc…), no de los agentes:
+    /// pathspecs SIEMPRE literales — un archivo llamado `*` o `:(top)x` no puede
+    /// ampliar un `git add`/`git commit` — y git nunca pide credenciales por TTY.
+    nonisolated static func commandEnvironment() -> [String: String] {
+        var environment = cleanEnvironment()
+        environment["GIT_LITERAL_PATHSPECS"] = "1"
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        return environment
+    }
+
+    /// `timeout` corta el comando (y su grupo) si no termina: un hook de git o un
+    /// prompt de GPG no pueden colgar la app.
+    nonisolated static func run(_ command: String, cwd: URL? = nil, timeout: TimeInterval = 120) async -> ShellResult {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/zsh")
                 process.arguments = ["-lc", command]
-                process.environment = cleanEnvironment()
+                process.environment = commandEnvironment()
                 process.standardInput = FileHandle.nullDevice
                 if let cwd { process.currentDirectoryURL = cwd }
 
@@ -63,12 +75,26 @@ enum ShellRunner {
                     group.leave()
                 }
 
-                process.waitUntilExit()
-                group.wait()
+                let timedOut = TimeoutFlag()
+                let watchdog = DispatchWorkItem { [process] in
+                    guard process.isRunning else { return }
+                    timedOut.set()
+                    kill(process.processIdentifier, SIGKILL)
+                }
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
 
+                process.waitUntilExit()
+                watchdog.cancel()
+                // Un nieto que herede los pipes no debe bloquear la lectura para siempre.
+                _ = group.wait(timeout: .now() + 5)
+
+                var stderr = String(data: errData, encoding: .utf8) ?? ""
+                if timedOut.isSet {
+                    stderr += String(localized: "\nEl comando superó \(Int(timeout)) s y se detuvo.")
+                }
                 continuation.resume(returning: ShellResult(
                     stdout: String(data: outData, encoding: .utf8) ?? "",
-                    stderr: String(data: errData, encoding: .utf8) ?? "",
+                    stderr: stderr,
                     exitCode: process.terminationStatus
                 ))
             }
@@ -79,4 +105,11 @@ enum ShellRunner {
     nonisolated static func quote(_ argument: String) -> String {
         "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
+}
+
+nonisolated private final class TimeoutFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.lock(); value = true; lock.unlock() }
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
 }

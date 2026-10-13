@@ -8,15 +8,15 @@ DERIVED=".build"
 
 echo "══ 1/4 · Build Debug"
 xcodebuild -project Fold.xcodeproj -scheme Fold -configuration Debug \
-  -destination 'platform=macOS' -derivedDataPath "$DERIVED" build -quiet
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath "$DERIVED" build -quiet
 
 echo "══ 2/4 · Build Release"
 xcodebuild -project Fold.xcodeproj -scheme Fold -configuration Release \
-  -destination 'platform=macOS' -derivedDataPath "$DERIVED" build -quiet
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath "$DERIVED" build -quiet
 
 echo "══ 3/4 · Tests"
 xcodebuild test -project Fold.xcodeproj -scheme Fold \
-  -destination 'platform=macOS' -derivedDataPath "$DERIVED" -quiet
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath "$DERIVED" -quiet
 
 echo "══ 4/4 · El build no ensucia git"
 if [ -n "$(git status --porcelain)" ]; then

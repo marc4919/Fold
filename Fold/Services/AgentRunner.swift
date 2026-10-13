@@ -89,10 +89,13 @@ enum AgentRunner {
             return refusalStream(String(localized: "CLI no soportada: \((binary as NSString).lastPathComponent)."))
         }
 
+        var environment = ProcessEnvironment.resolved()
+        environment.merge(invocation.environment) { _, new in new }
         let process = SupervisedProcess(config: .init(
             executable: binary,
             arguments: invocation.arguments,
             cwd: cwd,
+            environment: environment,
             inactivityTimeout: timeout,
             hardTimeout: max(timeout * 4, 3600)
         ))
@@ -213,7 +216,7 @@ enum AgentRunner {
         prompt: String,
         mode: AgentMode,
         resumeID: String?
-    ) -> (arguments: [String], parser: Parser)? {
+    ) -> (arguments: [String], parser: Parser, environment: [String: String])? {
         switch (binary as NSString).lastPathComponent {
         case "claude":
             // Fold hereda la sesión del CLI, nunca gestiona API keys
@@ -221,36 +224,50 @@ enum AgentRunner {
             var args = ["-p", prompt, "--output-format", "stream-json", "--verbose"]
             args += ["--permission-mode", mode == .work ? "acceptEdits" : "plan"]
             if let resumeID { args += ["--resume", resumeID] }
-            return (args, .claudeJSON)
+            return (args, .claudeJSON, [:])
 
         case "codex":
             let sandbox = mode == .work ? "workspace-write" : "read-only"
             if let resumeID {
                 // El subcomando resume no acepta -s: el sandbox va por config (-c).
                 return (["exec", "resume", "--json", "--skip-git-repo-check",
-                         "-c", "sandbox_mode=\"\(sandbox)\"", resumeID, prompt], .codexJSON)
+                         "-c", "sandbox_mode=\"\(sandbox)\"", resumeID, prompt], .codexJSON, [:])
             }
-            return (["exec", "--json", "--skip-git-repo-check", "-s", sandbox, prompt], .codexJSON)
+            return (["exec", "--json", "--skip-git-repo-check", "-s", sandbox, prompt], .codexJSON, [:])
 
         case "cursor-agent":
-            // Solo modo work: explorar se rechaza antes (sin read-only garantizado).
+            // Solo modo work: explorar se rechaza antes (read-only no verificado).
+            // -f autoriza comandos sin preguntar y SIN sandbox de SO: el cwd es el
+            // worktree, pero la contención depende de la propia CLI.
             var args = ["-p", prompt, "--output-format", "text"]
             if mode == .work { args.append("-f") }
             if let resumeID { args += ["--resume", resumeID] }
-            return (args, .plainText)
+            return (args, .plainText, [:])
 
         case "opencode":
-            // Explorar usa el agente integrado "plan": sin herramientas de escritura.
+            // Explorar NO usa el agente "plan" integrado (permite bash): Fold
+            // inyecta su propio agente con deny-all y solo herramientas de lectura.
             var args = ["run"]
-            if mode == .explore { args += ["--agent", "plan"] }
+            var environment: [String: String] = [:]
+            if mode == .explore {
+                args += ["--agent", openCodeExploreAgent]
+                environment["OPENCODE_CONFIG_CONTENT"] = openCodeExploreConfig
+            }
             if let resumeID { args += ["-s", resumeID] }
             args.append(prompt)
-            return (args, .plainText)
+            return (args, .plainText, environment)
 
         default:
             return nil
         }
     }
+
+    nonisolated static let openCodeExploreAgent = "fold-explore"
+
+    /// Agente de OpenCode para Explorar: `"*": "deny"` primero (incluye bash,
+    /// edit, write, patch, webfetch, task y herramientas MCP) y después solo
+    /// lectura. Los .env quedan fuera también.
+    nonisolated static let openCodeExploreConfig = #"{"agent":{"fold-explore":{"mode":"primary","description":"Fold: explorar en solo lectura","permission":{"*":"deny","read":{"*":"allow","*.env":"deny","*.env.*":"deny","*.env.example":"allow"},"glob":"allow","grep":"allow","list":"allow","todoread":"allow","todowrite":"allow"}}}}"#
 
     /// Limpia escapes ANSI y ruido de banner de la salida en texto plano.
     nonisolated private static func cleanRawLine(_ line: String) -> String? {

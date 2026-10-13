@@ -56,8 +56,8 @@ nonisolated struct AgentCapabilities: Sendable {
         case "opencode":
             AgentCapabilities(
                 structuredOutput: false,
-                supportsResume: true,
-                guaranteedReadOnly: true,   // --agent plan (agente sin herramientas de escritura)
+                supportsResume: false,      // `run` en texto plano no expone el id de sesión
+                guaranteedReadOnly: true,   // agente fold-explore: deny-all + solo lectura (AgentRunner)
                 supportsWrite: true,
                 osSandbox: false,
                 authCheck: .credentialFile(relativeToHome: ".local/share/opencode/auth.json"),
@@ -66,13 +66,13 @@ nonisolated struct AgentCapabilities: Sendable {
         case "cursor-agent":
             AgentCapabilities(
                 structuredOutput: false,
-                supportsResume: true,
-                guaranteedReadOnly: false,  // sin modo de solo lectura garantizado en headless
+                supportsResume: false,      // salida text: el chatId no se captura
+                guaranteedReadOnly: false,  // --mode ask/plan existen, pero Fold aún no los ha verificado
                 supportsWrite: true,        // -f
                 osSandbox: false,
                 authCheck: .command(arguments: ["status"], successContains: "ogged in"),
                 loginHint: String(localized: "Ejecuta `cursor-agent login` en tu terminal"),
-                readOnlyExplanation: String(localized: "Cursor CLI no garantiza un modo de solo lectura en headless; Explorar está deshabilitado con este agente. Usa Claude Code, Codex u OpenCode para explorar.")
+                readOnlyExplanation: String(localized: "Fold todavía no ha verificado el modo de solo lectura de Cursor CLI en headless; Explorar está deshabilitado con este agente. Usa Claude Code, Codex u OpenCode para explorar.")
             )
         default:
             nil
@@ -100,6 +100,11 @@ nonisolated struct AgentCapabilities: Sendable {
             }
             guard let result else { return false }
             guard result.state == .succeeded else { return false }
+            // "Not logged in" también contiene "logged in": se descarta antes.
+            let combined = (output + result.stderrTail).lowercased()
+            if combined.contains("not logged in") || combined.contains("not authenticated") {
+                return false
+            }
             if let successContains {
                 return output.contains(successContains) || result.stderrTail.contains(successContains)
             }

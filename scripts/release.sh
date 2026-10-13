@@ -15,7 +15,8 @@ VERSION=$(grep -m1 'MARKETING_VERSION = ' Fold.xcodeproj/project.pbxproj | sed '
 DIST="dist"
 ARCHIVE="$DIST/Fold.xcarchive"
 APP="$DIST/Fold.app"
-ZIP="$DIST/Fold-$VERSION.zip"
+BUILD=$(grep -m1 'CURRENT_PROJECT_VERSION = ' Fold.xcodeproj/project.pbxproj | sed 's/[^0-9]*//g')
+ZIP="$DIST/Fold-$VERSION-beta.$BUILD.zip"
 
 if [ -z "${FOLD_SIGN_IDENTITY:-}" ]; then
   echo "⚠ Falta FOLD_SIGN_IDENTITY (certificado Developer ID Application)."
@@ -28,7 +29,7 @@ fi
 echo "══ 1/6 · Archive Release ($VERSION)"
 rm -rf "$DIST" && mkdir -p "$DIST"
 xcodebuild -project Fold.xcodeproj -scheme Fold -configuration Release \
-  -destination 'platform=macOS' archive -archivePath "$ARCHIVE" -quiet \
+  -destination 'platform=macOS,arch=arm64' archive -archivePath "$ARCHIVE" -quiet \
   CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 cp -R "$ARCHIVE/Products/Applications/Fold.app" "$APP"
 

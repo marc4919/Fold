@@ -79,45 +79,6 @@ enum GitService {
         return .success(worktreeURL)
     }
 
-    /// Cierra el change: commit en el worktree, merge a la rama original y limpieza.
-    /// Si el commit falla habiendo cambios pendientes, aborta con detalle.
-    nonisolated static func mergeWorktree(
-        root: URL,
-        changeID: String,
-        worktree: URL,
-        message: String
-    ) async -> (ok: Bool, detail: String) {
-        let branch = "fold/\(changeID)"
-
-        let commit = await ShellRunner.run(
-            "git add -A && git commit -q -m \(ShellRunner.quote(message)) 2>&1",
-            cwd: worktree
-        )
-        if !commit.ok {
-            // Sin cambios que commitear es legítimo; cualquier otro fallo, no.
-            let pending = await ShellRunner.run("git status --porcelain 2>/dev/null", cwd: worktree)
-            if !pending.trimmedOutput.isEmpty {
-                return (false, String(localized: "El commit en el worktree falló: \(commit.stderr.isEmpty ? commit.stdout : commit.stderr)"))
-            }
-        }
-
-        let merge = await ShellRunner.run(
-            "git merge --no-ff \(ShellRunner.quote(branch)) -m \(ShellRunner.quote("merge: \(changeID)")) 2>&1",
-            cwd: root
-        )
-        guard merge.ok else {
-            _ = await ShellRunner.run("git merge --abort 2>/dev/null", cwd: root)
-            return (false, merge.stdout + merge.stderr)
-        }
-
-        let cleanup = await ShellRunner.run(
-            "git worktree remove \(ShellRunner.quote(worktree.path)) --force 2>&1; git branch -D \(ShellRunner.quote(branch)) 2>&1",
-            cwd: root
-        )
-        _ = cleanup // la limpieza fallida no invalida el merge; queda en el log de git
-        return (true, merge.trimmedOutput)
-    }
-
     /// Descarta el aislamiento de un change: elimina worktree y rama sin mergear.
     nonisolated static func discardWorktree(root: URL, changeID: String) async {
         let branch = "fold/\(changeID)"
@@ -126,15 +87,6 @@ enum GitService {
             "git worktree remove \(ShellRunner.quote(worktreePath)) --force 2>/dev/null; git branch -D \(ShellRunner.quote(branch)) 2>/dev/null",
             cwd: root
         )
-    }
-
-    /// Commit directo (modo sin aislamiento).
-    nonisolated static func commitAll(at root: URL, message: String) async -> Bool {
-        let result = await ShellRunner.run(
-            "git add -A && git commit -q -m \(ShellRunner.quote(message)) 2>&1",
-            cwd: root
-        )
-        return result.ok
     }
 
     /// SHA corto del último commit.

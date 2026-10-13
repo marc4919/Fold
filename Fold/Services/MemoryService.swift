@@ -172,7 +172,9 @@ enum MemoryService {
     }
 
     /// Añade una entrada como archivo markdown plano, versionable con git.
-    nonisolated static func add(title: String, body: String, kind: MemoryEntry.Kind, at root: URL) throws {
+    /// Devuelve el archivo creado.
+    @discardableResult
+    nonisolated static func add(title: String, body: String, kind: MemoryEntry.Kind, at root: URL) throws -> URL {
         let memoryURL = root.appendingPathComponent(".workspace/memory")
         try FileManager.default.createDirectory(at: memoryURL, withIntermediateDirectories: true)
 
@@ -192,5 +194,6 @@ enum MemoryService {
 
         try "kind: \(kind.rawValue)\n\n# \(title)\n\n\(body)\n"
             .write(to: fileURL, atomically: true, encoding: .utf8)
+        return fileURL
     }
 }

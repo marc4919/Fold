@@ -285,13 +285,16 @@ enum OpenSpecService {
     }
 
     /// Archiva un change: lo mueve a openspec/changes/archive/ (la esencia de /opsx:archive).
-    nonisolated static func archive(_ change: OpenSpecChangeInfo) throws {
+    /// Devuelve el destino dentro de archive/.
+    @discardableResult
+    nonisolated static func archive(_ change: OpenSpecChangeInfo) throws -> URL {
         let archiveDir = change.dirURL.deletingLastPathComponent().appendingPathComponent("archive")
         try fileManager.createDirectory(at: archiveDir, withIntermediateDirectories: true)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         let target = archiveDir.appendingPathComponent("\(formatter.string(from: .now))-\(change.id)")
         try fileManager.moveItem(at: change.dirURL, to: target)
+        return target
     }
 
     nonisolated private static func slugify(_ text: String) -> String {

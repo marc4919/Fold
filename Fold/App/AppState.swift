@@ -334,7 +334,7 @@ final class AppState {
                     // Borrado destructivo: solo dentro de openspec/changes/ del proyecto.
                     guard let root = self.projectURL else { throw CocoaError(.fileNoSuchFile) }
                     let changes = root.appendingPathComponent("openspec/changes")
-                    let target = try PathGuard.verify(info.dirURL, within: changes)
+                    let target = try PathGuard.verifyStrictlyInside(info.dirURL, within: changes)
                     try FileManager.default.removeItem(at: target)
                 } catch {
                     self.toasts.show(String(localized: "No se pudo borrar el change: \(error.localizedDescription)"))
@@ -355,8 +355,9 @@ final class AppState {
         guard isRealProject, let url = projectURL, let session, let info = session.realInfo else {
             return (false, String(localized: "No hay change activo que archivar"))
         }
+        let archivedURL: URL
         do {
-            try OpenSpecService.archive(info)
+            archivedURL = try OpenSpecService.archive(info)
         } catch {
             toasts.show(String(localized: "No se pudo archivar: \(error.localizedDescription)"))
             return (false, error.localizedDescription)
@@ -368,7 +369,7 @@ final class AppState {
         let body = summary.isEmpty
             ? String(localized: "Change «\(session.change.title)» mergeado y archivado.")
             : summary
-        try? MemoryService.add(
+        let memoryURL = try? MemoryService.add(
             title: session.change.title,
             body: body + "\n\n" + String(localized: "Archivado en openspec/changes/archive/ — el registro completo (exploración, plan, historia) vive allí."),
             kind: .decision,
@@ -377,9 +378,16 @@ final class AppState {
 
         // Cierre coherente: archive + memoria quedan en su commit y solo
         // entonces se limpian worktree, rama y registro de la transacción.
+        // El commit lleva SOLO las rutas de este cierre.
+        var closurePaths = [
+            "openspec/changes/\(info.id)",
+            "openspec/changes/archive/\(archivedURL.lastPathComponent)",
+        ]
+        if let memoryURL { closurePaths.append(".workspace/memory/\(memoryURL.lastPathComponent)") }
+
         var finalizeDetail: String?
         if let record = GitChangeTransaction.load(root: url, changeID: info.id) {
-            let result = await GitChangeTransaction.finalizeArchive(root: url, record: record)
+            let result = await GitChangeTransaction.finalizeArchive(root: url, record: record, paths: closurePaths)
             if !result.ok {
                 toasts.show(String(localized: "El archivo no quedó versionado: \(result.detail)"))
                 refreshRealProject()

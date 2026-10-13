@@ -252,8 +252,12 @@ final class ChangeSession {
         case .agent: "agent"
         case .system: "system"
         }
+        // history.json se versiona con el archivo del change: el detalle se
+        // acota para no guardar instrucciones o errores completos.
+        let limit = 280
+        let boundedDetail = detail.map { $0.count > limit ? String($0.prefix(limit)) + "…" : $0 }
         historyLog.append(StoredHistoryEvent(
-            stage: stage, actor: actorKey, date: .now, text: text, detail: detail
+            stage: stage, actor: actorKey, date: .now, text: text, detail: boundedDetail
         ))
         // La escritura va en background: el stream no bloquea el MainActor.
         historyStore.persist(historyLog)
@@ -1000,8 +1004,28 @@ final class ChangeSession {
                 }
             }
             if cwd == root {
-                // Modo directo (elección explícita): la transacción captura lo
-                // que el usuario tuviera staged para no commitearlo jamás.
+                // Modo directo (elección explícita): el manifiesto sale de
+                // `git status` del árbol principal, así que cambios previos del
+                // usuario se mezclarían con los del agente. Fail closed: la
+                // primera sesión exige el árbol limpio fuera del propio change.
+                if GitChangeTransaction.load(root: root, changeID: self.change.id) == nil {
+                    let foreign = await GitChangeTransaction.status(at: root).filter { entry in
+                        !entry.path.hasPrefix("openspec/changes/\(self.change.id)/")
+                            && !entry.path.hasPrefix(".workspace/")
+                    }
+                    if !foreign.isEmpty {
+                        let reason = String(localized: "El modo directo necesita el árbol limpio: hay \(foreign.count) archivo(s) con cambios previos. Haz commit o stash, o usa el modo aislado (worktree).")
+                        self.workError = reason
+                        self.terminalLines.append("⏺ \(reason)")
+                        self.toasts?.show(reason)
+                        self.logEvent(stage: "work", actor: .system,
+                                      text: String(localized: "Modo directo bloqueado — árbol con cambios previos"),
+                                      detail: reason)
+                        self.streamTask = nil
+                        self.workHandle = nil
+                        return
+                    }
+                }
                 _ = await GitChangeTransaction.begin(
                     root: root, changeID: self.change.id, worktreePath: nil, workBranch: nil
                 )

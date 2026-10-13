@@ -166,7 +166,10 @@ final class GitChangeTransactionTests: XCTestCase {
         )
 
         let merged = GitChangeTransaction.load(root: root, changeID: "mi-change")!
-        let finalize = await GitChangeTransaction.finalizeArchive(root: root, record: merged)
+        let finalize = await GitChangeTransaction.finalizeArchive(
+            root: root, record: merged,
+            paths: ["openspec/changes/mi-change", "openspec/changes/archive/2026-01-01-mi-change", ".workspace/memory/mi-change.md"]
+        )
         XCTAssertTrue(finalize.ok, finalize.detail)
 
         // Árbol limpio (el registro de la transacción también desapareció).
@@ -262,5 +265,76 @@ final class GitChangeTransactionTests: XCTestCase {
         let after = await git("rev-parse refs/heads/fold/mi-change")
         XCTAssertEqual(after.trimmedOutput, residualSHA.trimmedOutput,
                        "la rama residual conserva sus commits (sin -B)")
+    }
+
+    // MARK: - Endurecimiento previo a la publicación
+
+    func testPathspecsAreLiteral() async throws {
+        try await makeRepo()
+        let setup = await GitService.setupWorktree(root: root, changeID: "mi-change")
+        guard case .success(let worktree) = setup else { return XCTFail() }
+        var record = await GitChangeTransaction.begin(
+            root: root, changeID: "mi-change",
+            worktreePath: ".workspace/worktrees/mi-change", workBranch: "fold/mi-change"
+        )
+        // Un archivo llamado "*" no puede arrastrar al commit lo no revisado.
+        try "glob".write(to: worktree.appendingPathComponent("*"), atomically: true, encoding: .utf8)
+        try "colado".write(to: worktree.appendingPathComponent("no-revisado.txt"), atomically: true, encoding: .utf8)
+        record.approvedPaths = ["*"]
+        GitChangeTransaction.save(record, root: root)
+
+        let merge = await GitChangeTransaction.commitAndMerge(root: root, record: record, message: "feat: glob")
+        XCTAssertTrue(merge.ok, merge.detail)
+        let files = await git("show --name-only --format= HEAD^2")
+        XCTAssertEqual(files.trimmedOutput, "*")
+    }
+
+    func testUntrustedRecordIsRejected() async throws {
+        try await makeRepo()
+        _ = await git("branch develop")
+        let evil = ChangeTransactionRecord(
+            changeID: "mi-change", baseBranch: "main", baseSHA: "",
+            workBranch: "develop", worktreePath: ".workspace/worktrees/mi-change",
+            state: "merged", approvedPaths: [], preStagedPaths: [], createdAt: .now
+        )
+        GitChangeTransaction.save(evil, root: root)
+        XCTAssertNil(GitChangeTransaction.load(root: root, changeID: "mi-change"))
+
+        var escaping = evil
+        escaping.workBranch = "fold/mi-change"
+        escaping.worktreePath = "../fuera"
+        GitChangeTransaction.save(escaping, root: root)
+        XCTAssertNil(GitChangeTransaction.load(root: root, changeID: "mi-change"))
+    }
+
+    func testArchiveCommitsOnlyClosurePaths() async throws {
+        try await makeRepo()
+        // Otro change en curso y una memoria ajena: no deben entrar en el commit.
+        let other = root.appendingPathComponent("openspec/changes/otro")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        try "# otro".write(to: other.appendingPathComponent("proposal.md"), atomically: true, encoding: .utf8)
+        let memory = root.appendingPathComponent(".workspace/memory")
+        try FileManager.default.createDirectory(at: memory, withIntermediateDirectories: true)
+        try "ajena".write(to: memory.appendingPathComponent("ajena.md"), atomically: true, encoding: .utf8)
+
+        let record = await GitChangeTransaction.begin(root: root, changeID: "mi-change", worktreePath: nil, workBranch: nil)
+        let archive = root.appendingPathComponent("openspec/changes/archive")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(
+            at: root.appendingPathComponent("openspec/changes/mi-change"),
+            to: archive.appendingPathComponent("2026-01-01-mi-change")
+        )
+        try "# decisión".write(to: memory.appendingPathComponent("mi-change.md"), atomically: true, encoding: .utf8)
+
+        let result = await GitChangeTransaction.finalizeArchive(
+            root: root, record: record,
+            paths: ["openspec/changes/mi-change", "openspec/changes/archive/2026-01-01-mi-change", ".workspace/memory/mi-change.md"]
+        )
+        XCTAssertTrue(result.ok, result.detail)
+        let committed = await git("show --name-only --format= HEAD")
+        XCTAssertFalse(committed.stdout.contains("otro"))
+        XCTAssertFalse(committed.stdout.contains("ajena"))
+        XCTAssertTrue(committed.stdout.contains("2026-01-01-mi-change/proposal.md"))
+        XCTAssertTrue(committed.stdout.contains(".workspace/memory/mi-change.md"))
     }
 }

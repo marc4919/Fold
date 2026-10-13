@@ -26,3 +26,6 @@ dist/
 
 # Documentos personales del directorio de trabajo
 Propuesta-Taller-IA.pdf
+
+# Ajustes locales de Claude Code
+.claude/settings.local.json

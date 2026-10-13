@@ -270,7 +270,11 @@ struct PlanTabView: View {
             metaRow(label: String(localized: "Estado"), value: session.state == .planned
                 ? String(localized: "Esperando aprobación")
                 : String(localized: "Aceptado"))
-            metaRow(label: String(localized: "Generado por"), value: "/opsx:propose")
+            // En un proyecto real el plan sale del prompt de Fold al agente,
+            // no del comando /opsx:propose: la etiqueta dice quién lo generó.
+            metaRow(label: String(localized: "Generado por"), value: session.isReal
+                ? (session.agentBinary.map { ($0 as NSString).lastPathComponent } ?? String(localized: "agente"))
+                : "/opsx:propose")
             metaRow(label: "Tasks", value: tasksMeta)
             metaRow(
                 label: String(localized: "Specs afectadas"),

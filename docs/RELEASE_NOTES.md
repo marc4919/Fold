@@ -57,6 +57,9 @@ agentes CLI sobre proyectos OpenSpec.
 - El watcher FSEvents puede tardar ~1 s en reflejar cambios externos.
 - Sin release firmada todavía: se compila desde el código.
 - No hay integración ACP: los agentes se lanzan en headless por CLI.
+- **Las specs maestras no se sincronizan al archivar.** Fold mueve el change
+  a `archive/`, pero no fusiona sus deltas en `openspec/specs/` como hace
+  `openspec archive`. Fold no invoca el CLI de OpenSpec.
 
 ## Requisitos
 
